@@ -1,22 +1,14 @@
+# Alternativa a `bun run dev`: misma imagen de despliegue (API + front compilado) en http://localhost:3000.
 services:
-  api:
+  app:
     build:
       context: .
-      dockerfile: langgraph_app/Dockerfile
-    image: agente-contratos-api
+      dockerfile: Dockerfile
+    image: agente-contratos
     ports:
-      - "8787:8787"
+      - "3000:3000"
     env_file:
-      - path: langgraph_app/.env
+      - path: .env
         required: false
-    environment:
-      ROOT_DIR: /app
-      OUT_DIR: /app/data
-      API_PORT: "8787"
-    volumes:
-      - api-data:/app/data
     init: true
     restart: unless-stopped
-
-volumes:
-  api-data:

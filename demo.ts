@@ -4,11 +4,11 @@
  */
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { Alertas } from "./src/casos/alertas.ts";
-import type { Registro } from "./src/casos/registrar.ts";
-import type { Contrato } from "./src/dominio/contrato.ts";
-import { type ResultadoMensaje, llamarHerramienta, procesarBuzon } from "./src/flujo/procesar-buzon.ts";
-import type { ContextoHerramienta } from "./src/tools/herramienta.ts";
+import type { Alertas } from "./api/src/application/use-cases/alerts.ts";
+import type { Registro } from "./api/src/application/use-cases/register.ts";
+import type { Contrato } from "./api/src/core/domain/contract.ts";
+import { type ResultadoMensaje, llamarHerramienta, procesarBuzon } from "./api/src/application/workflows/process-mailbox.ts";
+import type { ContextoHerramienta } from "./api/src/tools/tool.ts";
 
 const HOY = "2026-09-03";
 const MENSAJE_A_CONFIRMAR = "msg-006";

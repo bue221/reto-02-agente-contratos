@@ -1,5 +1,5 @@
 ---
-# Generado por scripts/sync-modulo.ts: no editar a mano. Fuente: src/knowledge/registro-contratos.md
+# Generado por api/scripts/sync-module.ts: no editar a mano. Fuente: api/src/knowledge/registro-contratos.md
 name: registro-contratos
 description: Conocimiento del proceso de registro de contratos vigentes (reglas RN1–RN7, esquema del maestro, umbral de confianza, alertas y regla de gobierno). Úsalo al procesar el buzón de contratos.
 ---

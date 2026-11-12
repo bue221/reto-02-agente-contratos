@@ -4,22 +4,14 @@
   "private": true,
   "type": "module",
   "description": "Agente conversacional de registro de contratos vigentes: buzón único, extracción con confianza, maestro CSV, archivo tipo SharePoint y alertas.",
-  "workspaces": ["web"],
+  "workspaces": ["api", "web"],
   "scripts": {
-    "dev": "bun run scripts/dev.ts",
-    "start": "bun run src/server.ts",
+    "dev": "bun run --filter '*' dev",
+    "start": "bun run api/src/server.ts",
     "build": "bun run --cwd web build",
     "demo": "bun run demo.ts",
-    "sync:modulo": "bun run scripts/sync-modulo.ts",
-    "test": "bun test",
-    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p web"
-  },
-  "dependencies": {
-    "hono": "^4.7.0",
-    "zod": "^4.1.0"
-  },
-  "devDependencies": {
-    "@types/bun": "^1.2.0",
-    "typescript": "^5.9.0"
+    "sync:module": "bun run --cwd api sync:module",
+    "test": "bun run --cwd api test",
+    "typecheck": "bun run --cwd api typecheck && bun run --cwd web typecheck"
   }
 }

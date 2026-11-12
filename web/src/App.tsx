@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type CorreccionesVisibles, type FilaMaestroVisible, type RespuestaBandeja, type RespuestaBuzon, type Salud, api, obtenerSalud } from "./api";
-import { ChatApp } from "./chat/ChatApp";
-import { mensajeDeFalla } from "./formato";
-import { BandejaView } from "./views/BandejaView";
-import { BuzonView } from "./views/BuzonView";
-import { MaestroView } from "./views/MaestroView";
+import { type CorreccionesVisibles, type FilaMaestroVisible, type RespuestaBandeja, type RespuestaBuzon, type Salud, api, obtenerSalud } from "./lib/api";
+import { ChatView } from "./views/ChatView";
+import { mensajeDeFalla } from "./lib/format";
+import { ApprovalTrayView } from "./views/ApprovalTrayView";
+import { MailboxView } from "./views/MailboxView";
+import { MasterView } from "./views/MasterView";
 
 type Tab = "buzon" | "bandeja" | "maestro" | "chat";
 
@@ -228,7 +228,7 @@ export function App() {
         {cargando ? <p className="meta">Cargando datos del backend…</p> : null}
         {buzon?.errores.length ? <p className="meta">Correos ilegibles: {buzon.errores.map((falla) => `${falla.id} (${falla.error})`).join(", ")}</p> : null}
         {tab === "buzon" && buzon ? (
-          <BuzonView
+          <MailboxView
             mensajes={buzon.mensajes}
             seleccionado={seleccionado}
             onSeleccionar={setSeleccionado}
@@ -245,11 +245,11 @@ export function App() {
             onRechazar={rechazar}
           />
         ) : null}
-        {tab === "bandeja" ? <BandejaView bandeja={bandeja} busy={busy} onAprobar={aprobar} onRechazar={rechazar} /> : null}
-        {tab === "maestro" ? <MaestroView filas={filas} decisiones={bandeja.resueltas} /> : null}
+        {tab === "bandeja" ? <ApprovalTrayView bandeja={bandeja} busy={busy} onAprobar={aprobar} onRechazar={rechazar} /> : null}
+        {tab === "maestro" ? <MasterView filas={filas} decisiones={bandeja.resueltas} /> : null}
         {/* El chat se mantiene montado: un turno en curso no se pierde al cambiar de pestaña. */}
         <div hidden={tab !== "chat"}>
-          <ChatApp sessionId={sessionId} onNuevaSesion={nuevaSesion} onTurno={() => void refrescar()} />
+          <ChatView sessionId={sessionId} onNuevaSesion={nuevaSesion} onTurno={() => void refrescar()} />
         </div>
       </main>
     </div>

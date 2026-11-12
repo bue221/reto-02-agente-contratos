@@ -1,5 +1,5 @@
 ---
-# Generado por scripts/sync-modulo.ts: no editar a mano. Fuente: agent/prompt.md
+# Generado por api/scripts/sync-module.ts: no editar a mano. Fuente: agent/prompt.md
 description: Registra contratos vigentes desde el buzón único; extrae, valida contra el maestro, pide confirmación de lo dudoso y genera alertas.
 mode: primary
 permission:

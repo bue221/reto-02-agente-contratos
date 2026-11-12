@@ -4,20 +4,17 @@ on:
   push:
     branches: [main]
     paths: &rutas-backend
-      - "src/**"
-      - "tests/**"
+      - "api/**"
       - "agent/**"
       - "modulo/**"
-      - "scripts/**"
       - "fixtures/**"
       - "demo.ts"
       - "package.json"
       - "bun.lock"
-      - "tsconfig.json"
-      # La imagen de despliegue compila el front y comparte src/api/tipos.ts con él.
+      # La imagen de despliegue compila el front y comparte api/src/http/types.ts con él.
       - "web/**"
       - "Dockerfile"
-      - "Dockerfile.dockerignore"
+      - ".dockerignore"
       - ".github/workflows/backend.yml"
   pull_request:
     paths: *rutas-backend
@@ -57,11 +54,11 @@ jobs:
       - name: Instalar dependencias
         run: bun install --frozen-lockfile
 
-      - name: Typecheck del backend
-        run: bunx tsc --noEmit -p .
+      - name: Typecheck de la API
+        run: bun run --cwd api typecheck
 
       - name: Módulo sincronizado con agent/ y el conocimiento
-        run: bun run sync:modulo --check
+        run: bun run sync:module --check
 
       - name: Tests
         run: bun test

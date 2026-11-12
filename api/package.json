@@ -1,0 +1,21 @@
+{
+  "name": "agente-contratos-api",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/server.ts",
+    "start": "bun run src/server.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p .",
+    "sync:module": "bun run scripts/sync-module.ts"
+  },
+  "dependencies": {
+    "hono": "^4.7.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.9.0"
+  }
+}

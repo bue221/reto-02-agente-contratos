@@ -5,6 +5,7 @@ Agente de chat que actúa como **punto único de recepción de contratos**: lee 
 - **Link de prueba**: <https://reto02-contratos.vercel.app> (público, sin clave de acceso).
 - **Backend (AWS Lightsail)**: <https://reto02-contratos.wn60e6ytewk9j.us-east-1.cs.amazonlightsail.com/api/health>
 - **Planteamiento de la solución**: [`SOLUCION.md`](SOLUCION.md).
+- **Enunciado del reto**: [`docs/PRD.md`](docs/PRD.md) · **Wiki técnica**: [`docs/wiki/`](docs/wiki/Home.md).
 
 ## Arranque local (un comando)
 
@@ -14,7 +15,7 @@ Requisito: [Bun](https://bun.sh) ≥ 1.2.
 bun install && bun run dev
 ```
 
-Abre <http://localhost:5173>. `bun run dev` levanta el backend en `:3000` (con recarga) y el front Vite en `:5173` (con proxy de `/api` al backend).
+Abre <http://localhost:5173>. `bun run dev` ejecuta el script `dev` de cada workspace: la API (`api/`) en `:3000` con recarga y el front Vite (`web/`) en `:5173` con proxy de `/api` a la API.
 
 - **Sin clave** el backend usa el proveedor `offline`: un guion determinista que llama a las mismas herramientas, suficiente para recorrer el flujo de la demo (procesar el buzón, pedir confirmación de msg-006, registrar tras «confirmo …»).
 - **Con Gemini**: `cp .env.example .env` y completa `GOOGLE_API_KEY` ([Google AI Studio](https://aistudio.google.com/apikey)). Con `LLM_PROVIDER=auto` (por defecto) el backend usa Gemini si encuentra la clave.
@@ -71,8 +72,8 @@ Todas opcionales; ver [`.env.example`](.env.example). La clave solo vive en el b
 
 ```bash
 bun install && bun run demo.ts   # procesa los 6 mensajes llamando directo a las herramientas
-bun test                         # 84 pruebas: extracción, reglas, herramientas, ciclo, API, bandeja, reinicio, módulo
-bun run typecheck                # backend + front
+bun run test                     # 84 pruebas de api/tests: extracción, reglas, herramientas, ciclo, HTTP, bandeja, reinicio, módulo
+bun run typecheck                # api + web
 ```
 
 `demo.ts` limpia `out/`, hace la primera pasada (msg-006 queda sin registrar por revisión), una segunda llamada con `confirmado: true` y genera `out/alertas.md`.
@@ -98,22 +99,42 @@ Errores tipados: `{ ok: false, error: { codigo, mensaje } }` con `400 peticion_i
 
 ## Estructura
 
+Monorepo con dos workspaces de Bun: `api/` (backend) y `web/` (front).
+
 ```
-agent/prompt.md                     comportamiento (system prompt)
-src/knowledge/registro-contratos.md conocimiento del proceso (reglas, esquema, gobierno)
-src/tools/contratos.ts              herramientas contratos_* (zod, nunca lanzan, log en out/log.jsonl)
-src/agente/                         ciclo del agente, sesiones, guarda de confirmación
-src/casos/                          casos de uso: validar, registrar, estado de mensajes, vistas del buzón, línea de tiempo, reinicio
-src/flujo/                          orquestación sobre las herramientas: pasada de demo.ts y acciones de la bandeja
-src/llm/                            adaptador (adapter.ts), Gemini (gemini.ts), offline (offline.ts)
-src/api/                            app Hono (chat en app.ts, buzón/bandeja/reinicio en hitl.ts) y tipos compartidos con el front
-src/server.ts                       arranque
-web/src/                            front: App.tsx (pestañas), views/ (Buzón, Bandeja, Maestro), chat/, api.ts (cliente único)
-modulo/                             bonus: agente empaquetado (generado desde agent/ y src/knowledge/)
-demo.ts                             verificación sin modelo
+api/                                 backend Bun + Hono (workspace)
+├── package.json, tsconfig.json      dependencias y scripts de la API (dev, start, test, typecheck, sync:module)
+├── src/
+│   ├── server.ts                    arranque: compone dependencias y sirve API + front
+│   ├── config.ts                    variables de entorno validadas con zod
+│   ├── knowledge/registro-contratos.md  conocimiento del proceso (reglas, esquema, gobierno)
+│   ├── tools/                       herramientas contratos_* (contratos.ts) y su envoltorio común (tool.ts)
+│   ├── agent/                       ciclo del agente, guarda de confirmación, sesiones, prompt
+│   ├── llm/                         adaptador (adapter.ts), Gemini, offline y fábrica
+│   ├── http/                        rutas Hono (chat en app.ts, buzón/bandeja/reinicio en hitl.ts) y tipos compartidos con el front
+│   ├── application/use-cases/       validar, registrar, alertas, estado de mensajes, vistas del buzón, línea de tiempo, reinicio
+│   ├── application/workflows/       orquestación sobre las herramientas: pasada de demo.ts y acciones de la bandeja
+│   ├── core/                        núcleo puro, sin E/S: domain/, extraction/, rules/
+│   └── infrastructure/              archivos de fixtures/ y out/: buzón, maestro CSV, bitácoras, análisis, decisiones, cerrojo
+├── tests/                           unit/ (extracción, LLM) e integration/ (herramientas, agente, HTTP, bandeja, módulo)
+└── scripts/sync-module.ts           genera modulo/ desde agent/ y el conocimiento
+web/                                 front React + Vite (workspace): src/views, components, lib, styles
+agent/prompt.md                      comportamiento del agente (system prompt), compartido por la API y modulo/
+modulo/                              bonus PRD 9.4: el mismo agente empaquetado para otras plataformas (ver abajo)
+fixtures/reto-02/                    buzón, maestro y comerciales de entrada (solo lectura)
+docs/                                PRD del reto y wiki técnica (docs/wiki/Home.md)
+demo.ts                              verificación sin modelo
+package.json, bun.lock               workspaces y scripts que delegan en api/ y web/
+Dockerfile, docker-compose.yml, render.yaml   imagen única (API + front) y despliegues
 ```
 
-`modulo/agent.md` y `modulo/skill/registro-contratos/SKILL.md` se generan con `bun run sync:modulo` (un test falla si divergen); `modulo/tools/contratos.ts` reexporta las mismas herramientas.
+Desde la raíz, `bun run dev`, `bun run test`, `bun run typecheck`, `bun run demo` y `bun run sync:module` delegan en los workspaces; también puedes ejecutarlos dentro de `api/` o `web/`.
+
+**¿Qué es `modulo/`?** Es el bonus del PRD (§9.4): el mismo agente empaquetado como tres archivos para que otra plataforma de agentes lo use sin este servidor: `agent.md` (el prompt con frontmatter), `skill/registro-contratos/SKILL.md` (el conocimiento) y `tools/contratos.ts` (reexporta las herramientas de `api/`). No es código aparte.
+
+`modulo/agent.md` y `modulo/skill/registro-contratos/SKILL.md` se generan con `bun run sync:module` (un test falla si divergen); `modulo/tools/contratos.ts` reexporta las mismas herramientas.
+
+La documentación técnica completa está en la [wiki](docs/wiki/Home.md); las instrucciones para agentes de código, en [`AGENTS.md`](AGENTS.md).
 
 ## Despliegue
 
@@ -154,6 +175,8 @@ Para apagar el backend al terminar la defensa: `aws lightsail delete-container-s
 
 **Alternativa en un solo servicio**: el blueprint [`render.yaml`](render.yaml) despliega la misma imagen (API + front) en Render; solo hay que cargar `GOOGLE_API_KEY` como secreto.
 
-Notas: el contexto de build usa [`Dockerfile.dockerignore`](Dockerfile.dockerignore) (BuildKit lo prefiere sobre `.dockerignore`, que hoy excluye `src/` y `web/` por la versión anterior en `langgraph_app/`). El disco del contenedor es efímero: `out/` y las sesiones se pierden al redesplegar o reiniciar, lo cual es aceptable para la demo; mientras el contenedor vive, **Reiniciar demo** deja el buzón limpio sin redesplegar.
+En local, `docker compose up --build` levanta la misma imagen en <http://localhost:3000> y lee `.env` si existe.
 
-> `langgraph_app/` es la versión anterior (LangGraph) y no forma parte de esta entrega.
+Notas: el contexto de build lo filtra [`.dockerignore`](.dockerignore). El disco del contenedor es efímero: `out/` y las sesiones se pierden al redesplegar o reiniciar, lo cual es aceptable para la demo; mientras el contenedor vive, **Reiniciar demo** deja el buzón limpio sin redesplegar.
+
+> La versión anterior con LangGraph (`langgraph_app/`) se retiró del árbol; sigue disponible en el historial de git.

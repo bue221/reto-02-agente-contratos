@@ -8,12 +8,12 @@ Desde el 30 de mayo de 2026 nadie alimenta el maestro de contratos y solo llegan
 
 ```
 ┌────────────────────────┐  POST /api/chat       ┌──────────────────────────────────────────────┐
-│ Front React (web/)     │ ────────────────────▶ │ Backend Bun + Hono (src/server.ts, src/api/) │
-│ Pestañas:              │ ◀──────────────────── │  AgenteContratos (src/agente/ciclo.ts)       │
+│ Front React (web/)     │ ────────────────────▶ │ API Bun + Hono (api/src/server.ts, http/)    │
+│ Pestañas:              │ ◀──────────────────── │  AgenteContratos (api/src/agent/loop.ts)     │
 │ - Buzón (7 pasos,      │  { reply, toolCalls,  │   prompt → ProveedorLlm.enviar → llamadas    │
 │   correo vs extracción)│    needsConfirmation} │   → ejecutarHerramienta → … → respuesta      │
-│ - Bandeja de aprobación│  /api/buzon/*         │  Bandeja (src/flujo/bandeja.ts): procesar,   │
-│ - Maestro CSV          │  /api/bandeja/*       │   aprobar, rechazar con las mismas tools     │
+│ - Bandeja de aprobación│  /api/buzon/*         │  Bandeja (workflows/approval-tray.ts):       │
+│ - Maestro CSV          │  /api/bandeja/*       │   procesar, aprobar, rechazar (mismas tools) │
 │ - Chat (tool calls,    │  /api/maestro(.csv)   │  ProveedorLlm: Gemini (fetch) | Offline       │
 │   confirmación)        │  /api/demo/reset      │  Sesiones: memoria + out/sesiones/<id>.json   │
 └────────────────────────┘                       │  AccesoOut: turnos/bandeja comparten out/,    │
@@ -32,11 +32,11 @@ Desde el 30 de mayo de 2026 nadie alimenta el maestro de contratos y solo llegan
 | Pieza | Dónde vive | Regla |
 |---|---|---|
 | **Comportamiento** | `agent/prompt.md` | Qué hace el agente, qué no puede afirmar, cuándo pregunta, formato de respuesta. |
-| **Conocimiento** | `src/knowledge/registro-contratos.md` | RN1–RN7, esquema, umbral 0.8, alertas, supuestos y resumen de gobierno. Se anexa al prompt de sistema. |
-| **Ejecución** | `src/tools/contratos.ts` (+ `src/extraccion`, `src/reglas`, `src/casos`, `src/almacen`) | Única fuente de valores. Importable desde `demo.ts`, los tests y `modulo/` sin el servidor. |
-| **Parámetros de negocio** | `src/dominio/parametros.ts` | Umbral, similitud, fecha de corte, ventana de alertas. |
+| **Conocimiento** | `api/src/knowledge/registro-contratos.md` | RN1–RN7, esquema, umbral 0.8, alertas, supuestos y resumen de gobierno. Se anexa al prompt de sistema. |
+| **Ejecución** | `api/src/tools/contratos.ts` (+ `api/src/core/`, `api/src/application/`, `api/src/infrastructure/`) | Única fuente de valores. Importable desde `demo.ts`, los tests y `modulo/` sin el servidor. |
+| **Parámetros de negocio** | `api/src/core/domain/parameters.ts` | Umbral, similitud, fecha de corte, ventana de alertas. |
 
-El prompt y el conocimiento **se leen en cada turno**: cambiar una regla del proceso no toca ni reinicia el servidor. El servidor solo compone dependencias (`src/server.ts`) y expone HTTP (`src/api/app.ts` y `src/api/hitl.ts`, rutas delgadas); el ciclo solo conoce la interfaz `ProveedorLlm`.
+El prompt y el conocimiento **se leen en cada turno**: cambiar una regla del proceso no toca ni reinicia el servidor. El servidor solo compone dependencias (`api/src/server.ts`) y expone HTTP (`api/src/http/app.ts` y `api/src/http/hitl.ts`, rutas delgadas); el ciclo solo conoce la interfaz `ProveedorLlm`.
 
 **Human-in-the-loop fuera del chat.** Además del chat, el front tiene un **Buzón** (estado de cada correo derivado de `out/`, línea de tiempo de 7 pasos y el correo al lado de la extracción) y una **Bandeja de aprobación**. Ninguna acción de la bandeja tiene lógica de negocio propia: `procesar` es la misma pasada extraer → validar → registrar de `demo.ts`, `aprobar` llama a `contratos_registrar` con `confirmado: true` y el contrato corregido, y `rechazar` cierra el mensaje como `rechazado`. Todo pasa por `ejecutarHerramienta` (zod + `out/log.jsonl`) y cada decisión humana queda en `out/decisiones.jsonl` con quién, cuándo, por qué canal y qué corrigió.
 
@@ -44,7 +44,7 @@ El prompt y el conocimiento **se leen en cada turno**: cambiar una regla del pro
 
 ## 3. Ciclo del agente
 
-`AgenteContratos.conversar(sessionId, mensaje)` (`src/agente/ciclo.ts`):
+`AgenteContratos.conversar(sessionId, mensaje)` (`api/src/agent/loop.ts`):
 
 1. **Serializa por sesión** (un cerrojo por `sessionId`): dos peticiones simultáneas no intercalan historial.
 2. Agrega el mensaje del usuario y carga el prompt de sistema (prompt + conocimiento).
@@ -58,7 +58,7 @@ El prompt y el conocimiento **se leen en cada turno**: cambiar una regla del pro
 
 - Un mensaje queda *pendiente de confirmación* si `contratos_validar` devuelve `requiere_revision` no vacío para un `nuevo`/`actualizacion`, o si `contratos_registrar` responde `requiere revisión: …`. Sale de pendientes cuando `registrar` tiene éxito.
 - Si el turno deja pendientes nuevos, la respuesta lleva `needsConfirmation: true`; si el texto del modelo no termina en pregunta, el ciclo agrega una pregunta explícita. El front resalta la burbuja y muestra un banner con botón **Confirmo**.
-- **Guarda en el servidor** (`src/agente/ejecucion.ts`): `registrar` con `confirmado: true` solo se ejecuta para mensajes que quedaron pendientes **en un turno anterior**. El modelo no puede autoconfirmar en el mismo turno en que detecta la duda: recibe un error y debe preguntar.
+- **Guarda en el servidor** (`api/src/agent/execution.ts`): `registrar` con `confirmado: true` solo se ejecuta para mensajes que quedaron pendientes **en un turno anterior**. El modelo no puede autoconfirmar en el mismo turno en que detecta la duda: recibe un error y debe preguntar.
 - Además, `registrar` vuelve a extraer el documento en el servidor: si el modelo cambia un valor, ese campo queda con confianza 0 y solo pasa con `confirmado: true`.
 - **Una sola verdad para chat y bandeja**: `validar` y `registrar` (sin confirmar) guardan el último análisis de cada mensaje en `out/analisis.json`. Un mensaje *espera confirmación* si ese análisis es `nuevo`/`actualizacion` con campos en revisión y no está en `procesados.json`. Así, lo que el chat deja en revisión aparece en la bandeja, y lo que se aprueba o rechaza en cualquiera de los dos sale de ambos: al empezar cada turno, la sesión descarta los pendientes que ya se cerraron en otro canal, y una confirmación tardía en el chat recibe «ya fue procesado» en lugar de registrar dos veces.
 - **La bandeja también cumple CA3**: solo aprueba o rechaza mensajes que esperan confirmación (`409 no_pendiente` si no), con un humano identificado (`aprobador`). Las correcciones se validan con el mismo esquema zod de los campos del contrato y quedan con confianza 1 y evidencia «corregido por …»; el servidor revalida todo antes de escribir.
@@ -84,7 +84,7 @@ Verificado con Gemini real (dos turnos del PRD §11): primer turno con 15 llamad
 
 ## 5. Estrategia de extracción
 
-Determinista sobre `contrato.txt` (`src/extraccion/`), sin modelo:
+Determinista sobre `contrato.txt` (`api/src/core/extraction/`), sin modelo:
 
 1. **Segmentación**: encabezado, preámbulo, cláusulas (`PRIMERA — OBJETO`, …) y bloque de firmas. **Tipo**: contrato, otrosí u otro (cotización → rechazo RN4).
 2. **Partes**: el cliente es la parte rotulada «EL CONTRATANTE» distinta de Periferia (NIT 900123456); la razón social se toma del preámbulo y se busca su forma en el bloque de firmas. NIT sin puntos ni DV (`890.900.111-4` → `890900111`). **País** por tipo de identificador (NIT→CO, RTN→HN, RUC 13→EC, RUC 11→PE) cruzado con el domicilio.
@@ -184,7 +184,7 @@ Determinista sobre `contrato.txt` (`src/extraccion/`), sin modelo:
 | Bandeja HITL y reinicio de la demo | Hecho | `/api/buzon`, `/api/bandeja`, `/api/demo/reset`; tests de aprobar con correcciones (msg-006 → valor 0, fin 2027-08-31), rechazar, errores zod y reinicio durante un turno. |
 | CA4 llamadas visibles y en log | Hecho | `toolCalls`, historial de sesión, `out/log.jsonl`; test. |
 | CA5 errores en lenguaje claro | Hecho | Errores de proveedor, timeout y argumentos; tests. |
-| Front, API, adaptador, prompt aparte | Hecho | `web/`, `src/api/`, `src/llm/`, `agent/prompt.md`. |
+| Front, API, adaptador, prompt aparte | Hecho | `web/`, `api/src/http/`, `api/src/llm/`, `agent/prompt.md`. |
 | Arranque en un comando | Hecho | `bun run dev` (≈ segundos tras `bun install`). |
 | Link público | Hecho | Front en Vercel (<https://reto02-contratos.vercel.app>) y backend en AWS Lightsail; flujo de la sección 11 del PRD probado contra el link con Gemini. |
 | Bonus `modulo/` | Hecho | Generado desde las mismas piezas + test de sincronía. |
@@ -193,7 +193,7 @@ Determinista sobre `contrato.txt` (`src/extraccion/`), sin modelo:
 
 Se usaron **agentes de Cursor con modelos Claude** para:
 
-- **Diagnóstico**: contrastar la versión anterior (LangGraph en `langgraph_app/`) con el PRD y decidir reconstruir sobre un núcleo de herramientas propio.
+- **Diagnóstico**: contrastar la versión anterior (LangGraph en `langgraph_app/`, hoy retirada del árbol y disponible en el historial de git) con el PRD y decidir reconstruir sobre un núcleo de herramientas propio.
 - **Implementación**: fase 1 (dominio, extractor, reglas, almacenamiento, herramientas, `demo.ts`, pruebas) y fase 2 (adaptador LLM, ciclo del agente, API, front, módulo, despliegue), con commits pequeños y pruebas en cada paso.
 - **Verificación**: ejecución real contra Gemini, que destapó dos problemas corregidos: el modelo a veces no intenta `registrar` y solo pregunta (la confirmación pasó a detectarse también desde `validar`), y al reenviar el contrato omite campos `null` o manda `evidencia: null` (el esquema ahora los tolera y el prompt pide reintentar ante argumentos inválidos).
 - **Documentación**: este archivo y el README.
