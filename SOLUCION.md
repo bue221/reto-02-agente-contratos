@@ -6,28 +6,39 @@ Desde el 30 de mayo de 2026 nadie alimenta el maestro de contratos y solo llegan
 
 ## 2. Arquitectura
 
-```
-┌────────────────────────┐  POST /api/chat       ┌──────────────────────────────────────────────┐
-│ Front React (web/)     │ ────────────────────▶ │ API Bun + Hono (api/src/server.ts, http/)    │
-│ Pestañas:              │ ◀──────────────────── │  Recepcionista ReAct (api/src/agent/loop.ts) │
-│ - Buzón (7 pasos,      │  { reply, toolCalls,  │   prompt → ProveedorLlm.enviar → 5 tools     │
-│   correo vs extracción)│    needsConfirmation} │   recepcion_* (tools/recepcion.ts) → …       │
-│ - Bandeja de aprobación│  /api/buzon/*         │  Motor determinista (application/workflows): │
-│ - Maestro CSV          │  /api/bandeja/*       │   ingestar → extraer → validar → decidir →   │
-│ - Chat (tool calls y   │  /api/chat/stream SSE │   registrar | esperar_revision | cerrar →    │
-│   pasos del motor,     │  /api/demo/reset      │   alertas; la bandeja reanuda la misma pausa │
-│   confirmación)        │  /api/maestro(.csv)   │  ProveedorLlm: Gemini (fetch) | Offline       │
-└────────────────────────┘                       │  Sesiones: memoria + out/sesiones/<id>.json   │
-                                                 │  AccesoOut: turnos/bandeja comparten out/     │
-                                                 └──────────────┬───────────────────────────────┘
-                                                                │ herramientas contratos_* (zod), solo desde el motor
-                                       ┌────────────────────────┴────────────────────┐
-                                       ▼                                             ▼
-                          fixtures/reto-02/ (solo lectura)          out/ (escritura)
-                          buzon/, maestro-contratos.csv,            sharepoint/maestro-contratos.csv,
-                          comerciales.json                          sharepoint/Contratos/…, historial.jsonl,
-                                                                    procesados.json, analisis.json,
-                                                                    decisiones.jsonl, log.jsonl, alertas.md
+```mermaid
+flowchart TB
+  subgraph Front["Front React · web/"]
+    T1["Buzón · 7 pasos, correo vs extracción"]
+    T2[Bandeja de aprobación]
+    T3[Maestro CSV]
+    T4["Chat · tool calls, pasos del motor, confirmación"]
+  end
+
+  subgraph API["API Bun + Hono · api/src/server.ts, http/"]
+    REC["Recepcionista ReAct · agent/loop.ts<br/>prompt → ProveedorLlm.enviar → 5 recepcion_*"]
+    LLM["ProveedorLlm · Gemini por fetch u Offline"]
+    MOT["Motor determinista · application/workflows<br/>ingestar → extraer → validar → decidir →<br/>registrar | esperar_revision | cerrar → alertas"]
+    SES["Sesiones · memoria + out/sesiones/id.json"]
+    ACC["AccesoOut · turnos y bandeja comparten out/"]
+  end
+
+  subgraph Studio["studio/ · LangGraph.js en /langgraph"]
+    GR[grafos recepcionista, motor, reiniciar_demo]
+  end
+
+  FX[("fixtures/reto-02/ · solo lectura<br/>buzon/, maestro-contratos.csv, comerciales.json")]
+  OUT[("out/ · escritura<br/>sharepoint/maestro-contratos.csv, Contratos/…, historial.jsonl,<br/>procesados.json, analisis.json, decisiones.jsonl, log.jsonl, alertas.md")]
+
+  Front -->|"POST /api/chat, /api/chat/stream SSE<br/>/api/buzon/*, /api/bandeja/*, /api/maestro(.csv), /api/demo/reset"| API
+  API -->|"{ reply, toolCalls, needsConfirmation }"| Front
+  REC --> LLM
+  REC -->|"procesar_buzon · responder_revision"| MOT
+  T2 -.->|la bandeja reanuda la misma pausa| MOT
+  REC --> SES
+  GR --> MOT
+  MOT -->|"herramientas contratos_* (zod), solo desde el motor"| FX
+  MOT -->|"contratos_*"| OUT
 ```
 
 | Pieza | Dónde vive | Regla |

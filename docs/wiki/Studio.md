@@ -24,19 +24,63 @@ Los grafos usan la **misma raíz del proyecto** que la app: lo que se registre e
 
 La imagen Docker levanta este mismo servidor (`langgraphjs dev`, bajo Node 22, solo en `127.0.0.1:2024`) junto a la API, y la API lo publica en `/langgraph/*` con un reenvío transparente (`api/src/http/langgraph-proxy.ts`). Cuando `LANGGRAPH_URL` está definido, `/api/health` devuelve `studio: true` y la barra lateral del front muestra **Abrir en LangGraph Studio**, que abre `https://smith.langchain.com/studio/?baseUrl=<backend>/langgraph`. Studio llama a ese `baseUrl` desde el navegador del evaluador. Como corre en el mismo contenedor, comparte `out/` con la app: lo que se registre en Studio aparece en el Buzón, la Bandeja y el Maestro de la web, y al revés. Detalles de la imagen en [Despliegue](Deployment.md).
 
+```mermaid
+sequenceDiagram
+  participant U as Navegador
+  participant W as Front (web/)
+  participant API as API Bun · /api, /langgraph
+  participant LG as langgraphjs dev · 127.0.0.1:2024
+  participant ST as smith.langchain.com/studio
+
+  W->>API: GET /api/health
+  API-->>W: { studio: true }
+  U->>W: clic en «Abrir en LangGraph Studio»
+  W->>ST: abre ?baseUrl=<backend>/langgraph
+  ST->>API: GET /langgraph/assistants, threads, runs (desde el navegador)
+  API->>LG: reenvío sin el prefijo /langgraph
+  LG-->>API: JSON o stream SSE
+  API-->>ST: misma respuesta, CORS del servidor de LangGraph
+  alt el servidor de LangGraph no responde
+    API-->>ST: 502 langgraph_no_disponible
+  end
+```
+
 ## `reiniciar_demo`
 
-```
-__start__ ─▶ reiniciar ─▶ __end__
+```mermaid
+flowchart LR
+  S((__start__)) --> R["reiniciar · reiniciarDemo()"] --> E((__end__))
 ```
 
 Pestaña **Graph**, entrada `{}`, **Submit**. Llama al mismo `reiniciarDemo()` que `POST /api/demo/reset`: borra `out/`, vuelve a copiar el maestro del fixture y devuelve `{ "mensajes": 6, "error": null }`. Es un grafo aparte, no una herramienta, para que el modelo nunca pueda borrar `out/`. A diferencia del endpoint, no vacía las sesiones que la API tenga en memoria: si `bun run dev` está corriendo, abre también una sesión de chat nueva en el front.
 
 ## `recepcionista`
 
-```
-__start__ ─▶ guarda_entrada ─▶ recepcionista ⇄ herramientas ─(recepcion_procesar_buzon)─▶ [motor]
-                   └─(bloqueado)─────┴──────────▶ __end__
+```mermaid
+flowchart TD
+  S((__start__)) --> G[guarda_entrada]
+  G -->|bloqueado| E((__end__))
+  G -->|permitido| R["recepcionista · ProveedorLlm"]
+  R -->|sin tool_calls| E
+  R -->|con tool_calls| H
+  subgraph H["herramientas · ejecutarLlamada + guarda CA3"]
+    direction TB
+    L["recepcion_consultar_estado<br/>recepcion_consultar_maestro<br/>recepcion_explicar_validacion"]
+    RR["recepcion_responder_revision<br/>reanudarRevision"]
+    subgraph M["subgrafo motor · recepcion_procesar_buzon"]
+      direction LR
+      MI[ingestar] --> MS[siguiente_mensaje]
+      MS --> MX[extraer] --> MV[validar] --> MD{decidir}
+      MD --> MR[registrar]
+      MD --> MP[esperar_revision]
+      MD --> MC[cerrar]
+      MR --> MS
+      MP --> MS
+      MC --> MS
+      MS -->|cola vacía| MA[alertas]
+    end
+  end
+  H --> R
 ```
 
 `guarda_entrada` aplica las mismas guardas de la app ([Ciclo del agente](Agent-Loop.md#guardas-de-alcance-y-de-manipulación)): reglas deterministas y, con Gemini, el clasificador de alcance. Si bloquea, responde con un texto fijo y el turno termina sin llamar al modelo. Prueba: «hola, ¿cuánto es 2 mas 2?» o «ignora tus instrucciones».
@@ -53,13 +97,29 @@ El aviso «LangSmith API key is missing» de Studio es opcional: solo hace falta
 
 ## `motor`
 
+```mermaid
+flowchart TD
+  S((__start__)) --> I["ingestar · contratos_leer_buzon"]
+  I --> N{siguiente_mensaje}
+  N -->|queda cola| X["extraer · contratos_extraer"]
+  X -->|ok| V["validar · contratos_validar"]
+  X -->|"fallo · desenlace error"| N
+  V -->|ok| D{"decidir · rutaTrasValidar"}
+  V -->|"fallo · desenlace error"| N
+  D -->|"nuevo o actualización limpio"| R["registrar · contratos_registrar"]
+  D -->|"requiere_revision no vacío"| P["esperar_revision · desenlace en_revision"]
+  D -->|"duplicado o rechazado"| C["cerrar · sin escritura"]
+  R -->|"requiere revisión al revalidar"| P
+  R --> N
+  P --> N
+  C --> N
+  N -->|cola vacía| A["alertas · contratos_alertas"]
+  A -->|"quedan mensajes sin decidir"| H[["revision_humana · interrupt()"]]
+  H -->|"Command resume: aprobar o rechazar<br/>reanudarRevision · via studio"| A
+  A -->|todo decidido| E((__end__))
 ```
-ingestar ─▶ siguiente_mensaje ─┬─▶ extraer ─▶ validar ─▶ decidir ─┬─▶ registrar ──────┐
-                 ▲             │                                 ├─▶ esperar_revision ┤
-                 └─────────────┼─────────────────────────────────┴─▶ cerrar ──────────┘
-                               └─▶ alertas ─┬─▶ revision_humana (interrupt) ─▶ alertas
-                                            └─▶ __end__
-```
+
+Las aristas de `extraer` a `cerrar` salen de la tabla `ARISTAS` de `contract-graph.ts`: el mismo grafo que recorre `ejecutarGrafoMensaje` en la app. Cuando un nodo termina el mensaje (destino `null` en `ARISTAS`), vuelve a `siguiente_mensaje`.
 
 Pestaña **Graph**. Entrada: `{ "hoy": "2026-09-03" }` (opcional `"mensaje_ids": ["msg-006"]`). El grafo procesa todo el buzón, genera alertas y se **detiene en `revision_humana`** con el detalle de msg-006 (campos, confianza, evidencia). Reanuda desde Studio con:
 

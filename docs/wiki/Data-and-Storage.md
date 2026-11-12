@@ -71,14 +71,83 @@ out/
 | `sharepoint/Contratos/…` | `logs.ts` (`archivarDocumento`) | Copia del adjunto. |
 | `procesados.json` | `logs.ts` (`marcarProcesado`) | `{ "<mensaje_id>": { estado: "registrado" \| "actualizado" \| "duplicado" \| "rechazado", id_contrato, ts } }` |
 | `analisis.json` | `analysis-store.ts` | `{ "<mensaje_id>": { ts, validacion } }`; solo análisis sin confirmación. |
-| `decisiones.jsonl` | `decision-store.ts` | `{ ts, mensaje_id, decision: "aprobado" \| "rechazado", via: "bandeja" \| "chat", aprobador, correcciones, motivo, id_contrato, accion, cambios }` |
+| `decisiones.jsonl` | `decision-store.ts` | `{ ts, mensaje_id, decision: "aprobado" \| "rechazado", via: "bandeja" \| "chat" \| "studio", aprobador, correcciones, motivo, id_contrato, accion, cambios }` |
 | `log.jsonl` | `tools/tool.ts`, `agent/execution.ts`, bandeja | `{ ts, herramienta, mensaje_id, ok, resumen }`; la bandeja usa `bandeja_aprobar` / `bandeja_rechazar`. |
 | `alertas.md` | `use-cases/alerts.ts` | Markdown con tres tablas. |
 | `sesiones/<id>.json` | `agent/sessions.ts` | Sesión completa (ver [Ciclo del agente](Agent-Loop.md#sesiones)). |
 
+### Quién escribe y quién lee
+
+```mermaid
+flowchart LR
+  subgraph Entrada["fixtures/reto-02/ · solo lectura"]
+    FB[buzon/msg-*]
+    FM[maestro-contratos.csv]
+    FC[comerciales.json]
+  end
+
+  subgraph Escritores["Herramientas y casos de uso"]
+    LB[contratos_leer_buzon]
+    EX[contratos_extraer]
+    VA[contratos_validar]
+    RG[contratos_registrar]
+    AL[contratos_alertas]
+    TR["approval-tray.ts · aprobar / rechazar"]
+    TL["tools/tool.ts · execution.ts · guardrails/audit.ts"]
+    SE[agent/sessions.ts]
+    RS[reiniciarDemo]
+  end
+
+  subgraph Salida["out/"]
+    OM[(sharepoint/maestro-contratos.csv)]
+    OH[(sharepoint/historial.jsonl)]
+    OA[(sharepoint/Contratos/…)]
+    OP[(procesados.json)]
+    ON[(analisis.json)]
+    OD[(decisiones.jsonl)]
+    OL[(log.jsonl)]
+    OR[(alertas.md)]
+    OS[(sesiones/id.json)]
+  end
+
+  FB --> LB
+  FB --> EX
+  FC --> VA
+  FC --> RG
+  FM -->|copia inicial| RS
+  RS -->|borra out/ y copia| OM
+  OM --> VA
+  VA -->|análisis sin confirmar| ON
+  VA -->|duplicado o rechazado| OP
+  RG --> OM
+  RG --> OH
+  RG --> OA
+  RG --> OP
+  TR --> RG
+  TR -->|rechazo| OP
+  TR --> OD
+  OM --> AL
+  AL --> OR
+  TL --> OL
+  SE --> OS
+```
+
+`contratos_registrar` es la única que toca el maestro, y siempre después de revalidar. `contratos_validar` guarda en `analisis.json` todo análisis hecho sin `confirmado` y, si el mensaje es duplicado o rechazado, lo cierra en `procesados.json` sin tocar el maestro.
+
 ## Una sola verdad
 
 El estado de cada mensaje se deriva **solo** de `procesados.json` + `analisis.json` + `decisiones.jsonl` (`leerEstadoOut` en `use-cases/message-status.ts`). Chat, buzón y bandeja leen lo mismo, así una decisión tomada en un canal se ve en todos sin sincronización extra.
+
+```mermaid
+flowchart LR
+  OP[(procesados.json)] --> E["leerEstadoOut<br/>use-cases/message-status.ts"]
+  ON[(analisis.json)] --> E
+  OD[(decisiones.jsonl)] --> E
+  E --> C["Chat · recepcion_consultar_estado"]
+  E --> B["Buzón · GET /api/buzon"]
+  E --> T["Bandeja · GET /api/bandeja"]
+  E --> S["Studio · mismos out/ y misma función"]
+```
 
 ## Garantías de escritura
 

@@ -18,6 +18,21 @@ flowchart LR
   T --> O[(out/ maestro, archivo, logs)]
 ```
 
+## Diagramas
+
+| Qué muestra | Dónde |
+|---|---|
+| Capas del sistema y los dos grafos (recepcionista y motor) | [Arquitectura](Architecture.md) |
+| Turno del chat, guardas de entrada y salida, pausa humana desde chat, bandeja y Studio | [Ciclo del agente](Agent-Loop.md) |
+| Grafos de LangGraph (`recepcionista`, `motor`, `reiniciar_demo`) y cómo se abre Studio desde la web | [LangGraph Studio](Studio.md) |
+| Topología en producción, etapas de la imagen, arranque del contenedor y CI/CD | [Despliegue](Deployment.md) |
+| Quién escribe y quién lee cada archivo de `out/` | [Datos y almacenamiento](Data-and-Storage.md) |
+| Mapa de rutas HTTP y eventos SSE del chat | [API HTTP](API.md) |
+| Vistas del front y su cliente de API | [Front](Frontend.md) |
+| Clasificación RN1–RN5 y estados de un mensaje | [Reglas de negocio](Business-Rules.md) |
+| Pipeline del extractor | [Extracción](Extraction.md) |
+| Envoltorio común de herramientas | [Herramientas](Tools.md) |
+
 ## Páginas
 
 | Página | Para qué |

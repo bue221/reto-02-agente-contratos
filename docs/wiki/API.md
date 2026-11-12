@@ -23,6 +23,39 @@ Código: `api/src/http/app.ts` (chat, salud, sesiones, maestro), `api/src/http/h
 
 Rutas fuera de `/api/*` sirven el front compilado (`web/dist`) si existe, con fallback a `index.html`.
 
+```mermaid
+flowchart LR
+  subgraph AppTs["http/app.ts"]
+    R1["POST /api/chat<br/>POST /api/chat/stream"]
+    R2["GET /api/sessions/:id"]
+    R3["GET /api/maestro"]
+    R4["GET /api/health"]
+  end
+  subgraph HitlTs["http/hitl.ts"]
+    R5["GET /api/buzon<br/>GET /api/buzon/:id"]
+    R6["POST /api/buzon/:id/procesar"]
+    R7["GET /api/bandeja"]
+    R8["POST /api/bandeja/:id/aprobar<br/>POST /api/bandeja/:id/rechazar"]
+    R9["GET /api/maestro.csv"]
+    R10["POST /api/demo/reset"]
+  end
+  R11["/langgraph/* · langgraph-proxy.ts"]
+
+  R1 --> AG["AgenteContratos · agent/loop.ts"]
+  R2 --> SS["Sesiones"]
+  R3 --> MS["leerMaestro"]
+  R9 --> MS
+  R5 --> VB["listarBuzon · detalleMensaje"]
+  R7 --> BJ["listarBandeja"]
+  R6 --> PB["procesarDesdeBuzon → ejecutarGrafoMensaje"]
+  R8 --> AP["aprobar · rechazar · approval-tray.ts"]
+  R10 --> RS["reiniciarDemo · AccesoOut exclusivo"]
+  R11 --> LG["servidor de LangGraph · studio/"]
+  AG --> MOT["motor · contratos_*"]
+  PB --> MOT
+  AP --> MOT
+```
+
 ## Streaming del chat
 
 `POST /api/chat/stream` ejecuta el mismo turno que `/api/chat` (mismo esquema zod, mismo cerrojo de `out/`) y emite cada evento como `data: <JSON>` de SSE, con la forma `EventoChat` de `api/src/http/types.ts`:
@@ -34,6 +67,34 @@ Rutas fuera de `/api/*` sirven el front compilado (`web/dist`) si existe, con fa
 | `paso` | Terminó una `contratos_*` del motor | `paso` (`LlamadaVisible`) |
 | `resultado` | Terminó la `recepcion_*` | `llamada` (`LlamadaVisible` con sus `pasos`) |
 | `fin` | Último evento, siempre | `respuesta`: la misma `RespuestaChat` que devolvería `/api/chat` |
+
+```mermaid
+sequenceDiagram
+  participant F as Front · lib/sse.ts
+  participant H as POST /api/chat/stream
+  participant A as AgenteContratos.conversar
+  participant P as ProveedorLlm
+  participant M as Motor · contratos_*
+
+  F->>H: { sessionId, message }
+  H->>H: zod del cuerpo (400 JSON si es inválido)
+  H->>A: conversar(sessionId, mensaje, observador)
+  loop cada iteración del ciclo
+    A-->>F: data: { tipo: "modelo", iteracion }
+    A->>P: enviar(historial, recepcion_*)
+    P-->>A: llamadas a herramientas
+    A-->>F: data: { tipo: "herramienta", nombre, args }
+    opt procesar_buzon o responder_revision
+      loop cada nodo del motor
+        M-->>F: data: { tipo: "paso", paso }
+      end
+    end
+    A-->>F: data: { tipo: "resultado", llamada }
+  end
+  Note over H,F: cada 15 s ": latido" mientras el modelo piensa
+  A-->>H: RespuestaChat
+  H-->>F: data: { tipo: "fin", respuesta } y cierra
+```
 
 Cada 15 s se envía un comentario `: latido` para que proxies y balanceadores no corten la conexión mientras el modelo piensa. Un cuerpo inválido responde `400` JSON, no un stream. Si el cliente se desconecta, el turno termina igual y queda en la sesión. El front usa esta ruta y, si el backend responde `404` (desplegado antes que el front), reenvía por `/api/chat`.
 

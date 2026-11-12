@@ -86,9 +86,62 @@ La excepción es un mensaje ya cerrado: pasa a la reanudación, que responde «y
 
 **Una sola verdad con la bandeja**: chat y bandeja reanudan la pausa con la misma función (`aprobar` / `rechazar` de `approval-tray.ts`). Una decisión tomada en el chat se anota en `out/decisiones.jsonl` con `via: "chat"` y aparece en la bandeja junto a las decisiones tomadas allí.
 
+```mermaid
+sequenceDiagram
+  actor An as Analista
+  participant Ch as Chat · recepcion_responder_revision
+  participant Bj as Bandeja · POST /api/bandeja/:id/aprobar
+  participant St as Studio · revision_humana
+  participant RR as reanudarRevision · approval-tray.ts
+  participant Rg as contratos_registrar
+  participant Out as out/
+
+  Note over Ch: turno N: el motor pausa msg-006 y el agente pregunta
+  alt por el chat · turno N+1
+    An->>Ch: «confirmo el valor 0 y la fecha fin 2027-08-31»
+    Ch->>Ch: guarda CA3: ¿msg-006 pendiente al inicio del turno?
+    Ch->>RR: aprobar · via chat
+  else por la bandeja
+    An->>Bj: aprobador + correcciones
+    Bj->>RR: aprobar · via bandeja
+  else por Studio
+    An->>St: Command resume { decision, correcciones, aprobador }
+    St->>RR: aprobar · via studio
+  end
+  RR->>RR: enEspera: existe, no cerrado y con análisis pendiente
+  RR->>RR: reextrae y aplica correcciones (confianza 1, evidencia del aprobador)
+  RR->>Rg: confirmado: true
+  Rg->>Rg: revalida en el servidor
+  Rg->>Out: maestro, historial, archivo, procesados.json
+  RR->>Out: log.jsonl (via_aprobar) y decisiones.jsonl
+  RR->>Out: contratos_alertas regenera alertas.md (si llega hoy)
+  Note over Out: chat, bandeja y Studio leen el mismo estado y ven el mensaje cerrado
+```
+
 ## Guardas de alcance y de manipulación
 
 La recepcionista solo atiende la recepción de contratos. La sección «Alcance» de `agent/prompt.md` lo pide, pero un prompt se puede desarmar con otro prompt, así que el servidor lo impone con guardas en `api/src/agent/guardrails/`. El ciclo de la app y el grafo de Studio usan las mismas.
+
+```mermaid
+flowchart TD
+  M([mensaje de la analista]) --> TK{"¿tope de tokens<br/>de sesión o de proceso?"}
+  TK -- sí --> TOPE["respuesta de tope · sin modelo ni clasificador"]
+  TK -- no --> RD{"reglaDeManipulacion<br/>input-guard.ts"}
+  RD -- coincide --> BQ["respuesta fija de bloqueo<br/>recuerda pendientes · guarda_entrada en log.jsonl"]
+  RD -- no --> CL{"¿hay clasificador?<br/>solo con Gemini"}
+  CL -- no · offline --> LOOP
+  CL -- sí --> VC{"ClasificadorLlm<br/>permitido · fuera_de_alcance · manipulacion"}
+  VC -- "fuera_de_alcance o manipulacion" --> BQ
+  VC -- "falla o veredicto inválido · falla cerrado" --> BQ
+  VC -- permitido --> LOOP["bucle ReAct · prompt con canario<br/>5 herramientas recepcion_*"]
+  LOOP --> GR{"revisarRespaldo · grounding.ts<br/>ids, fechas y montos con fuente"}
+  GR -- todo con fuente --> CN
+  GR -- "datos sin respaldo" --> AV["agrega «Verificación del servidor: …»<br/>guarda_respaldo en log.jsonl"] --> CN
+  CN{"revisarSalida · output-guard.ts<br/>¿contiene el canario?"}
+  CN -- sí --> FX["respuesta fija · guarda_salida en log.jsonl"]
+  CN -- no --> OK([respuesta al chat])
+  BQ -.->|no entra al historial del modelo| H[(sesion.turnos)]
+```
 
 | Capa | Qué hace | Si bloquea |
 |---|---|---|

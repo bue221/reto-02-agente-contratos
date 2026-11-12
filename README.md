@@ -7,6 +7,22 @@ Agente de chat que actúa como **punto único de recepción de contratos**: lee 
 - **Planteamiento de la solución**: [`SOLUCION.md`](SOLUCION.md).
 - **Enunciado del reto**: [`docs/PRD.md`](docs/PRD.md) · **Wiki técnica**: [`docs/wiki/`](docs/wiki/Home.md).
 
+## Arquitectura en una mirada
+
+```mermaid
+flowchart LR
+  U[Analista] --> W["Front React · Vercel"]
+  W -->|"/api · SSE"| API["API Bun + Hono · Lightsail"]
+  LS["LangGraph Studio"] -->|/langgraph| API
+  API --> R["Recepcionista ReAct<br/>Gemini u offline"]
+  R -->|"5 herramientas recepcion_*"| M["Motor determinista<br/>extraer → validar → decidir"]
+  API -->|"bandeja: aprobar o rechazar"| M
+  M -->|"contratos_* · zod + log.jsonl"| O[("out/ · maestro, decisiones, alertas")]
+  M --> F[("fixtures/ · solo lectura")]
+```
+
+El modelo conversa y enciende o reanuda el motor; nunca elige el camino de un contrato. Diagramas completos: [Arquitectura](docs/wiki/Architecture.md), [Ciclo del agente](docs/wiki/Agent-Loop.md), [LangGraph Studio](docs/wiki/Studio.md), [Datos](docs/wiki/Data-and-Storage.md) y [Despliegue](docs/wiki/Deployment.md).
+
 ## Arranque local (un comando)
 
 Requisito: [Bun](https://bun.sh) ≥ 1.2.
