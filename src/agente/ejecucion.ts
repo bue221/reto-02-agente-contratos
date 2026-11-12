@@ -1,5 +1,5 @@
 import type { LlamadaVisible } from "../api/tipos.ts";
-import { registrarLog } from "../almacen/bitacoras.ts";
+import { leerProcesados, registrarLog } from "../almacen/bitacoras.ts";
 import { registrarDecision } from "../almacen/decisiones.ts";
 import { rutasDelProyecto } from "../almacen/rutas.ts";
 import { PREFIJO_REQUIERE_REVISION, type Registro } from "../casos/registrar.ts";
@@ -24,6 +24,11 @@ const esRegistrar = (nombre: string): boolean => nombre === REGISTRAR || nombre 
 const esValidar = (nombre: string): boolean => nombre === "contratos_validar" || nombre === "validar";
 const mensajeIdDe = (args: Record<string, unknown>): string | null => (typeof args.mensaje_id === "string" ? args.mensaje_id : null);
 
+/** Un mensaje ya cerrado (p. ej. aprobado en la bandeja) pasa a `registrar`, que explica que ya fue procesado. */
+async function yaProcesado(ctx: ContextoHerramienta, mensajeId: string | null): Promise<boolean> {
+  return mensajeId !== null && mensajeId in (await leerProcesados(rutasDelProyecto(ctx.directory)).catch(() => ({})));
+}
+
 /**
  * `confirmado = true` solo vale para un mensaje por el que el agente preguntó en un turno anterior:
  * el modelo no puede autoconfirmar en el mismo turno en que detecta la duda.
@@ -31,6 +36,7 @@ const mensajeIdDe = (args: Record<string, unknown>): string | null => (typeof ar
 async function confirmacionNoAutorizada(llamada: LlamadaHerramienta, ctx: ContextoHerramienta, pendientes: ReadonlySet<string>): Promise<string | null> {
   const mensajeId = mensajeIdDe(llamada.args);
   if (!esRegistrar(llamada.nombre) || llamada.args.confirmado !== true || (mensajeId && pendientes.has(mensajeId))) return null;
+  if (await yaProcesado(ctx, mensajeId)) return null;
   const error = `confirmación no autorizada para ${mensajeId ?? "(sin mensaje_id)"}: el usuario aún no ha confirmado. Muéstrale los campos en revisión, pregúntale y termina el turno.`;
   await registrarLog(rutasDelProyecto(ctx.directory), { herramienta: REGISTRAR, mensaje_id: mensajeId, ok: false, resumen: error }).catch((falla: unknown) =>
     console.error(`[log] no se pudo escribir out/log.jsonl: ${mensajeDeError(falla)}`),

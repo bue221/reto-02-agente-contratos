@@ -1,5 +1,5 @@
 import { guardarAnalisis } from "../almacen/analisis.ts";
-import { marcarProcesado } from "../almacen/bitacoras.ts";
+import { leerProcesados, marcarProcesado } from "../almacen/bitacoras.ts";
 import { type Remitente, avisoDeRemitente, resolverRemitente } from "../almacen/comerciales.ts";
 import { leerMaestro } from "../almacen/maestro.ts";
 import type { Rutas } from "../almacen/rutas.ts";
@@ -56,8 +56,10 @@ async function marcarSiEsTerminal(rutas: Rutas, mensajeId: string, validacion: V
 /**
  * Deja constancia de la evaluación: el último análisis sin confirmación humana es la fuente única
  * de "espera confirmación" para el chat y la bandeja. Devuelve si el mensaje quedó cerrado.
+ * Un mensaje ya cerrado no se toca: revalidarlo contra el maestro que él mismo actualizó daría "duplicado".
  */
 export async function anotarEvaluacion(rutas: Rutas, mensajeId: string, validacion: Validacion, confirmado: boolean): Promise<boolean> {
+  if ((await leerProcesados(rutas))[mensajeId]) return true;
   if (!confirmado) await guardarAnalisis(rutas, mensajeId, validacion);
   return marcarSiEsTerminal(rutas, mensajeId, validacion);
 }
