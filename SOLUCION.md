@@ -107,7 +107,7 @@ Determinista sobre `contrato.txt` (`src/extraccion/`), sin modelo:
 | **Proveedor offline con guion determinista** | Solo mocks en tests | Permite probar la app completa sin clave (también en el link si la clave falla) y es el mismo contrato `ProveedorLlm`. Costo: no conversa libremente; responde ayuda fuera del guion. |
 | **Sesiones en memoria + JSON en `out/sesiones/`** | Base de datos o Redis | El PRD no pide base de datos y hay un solo proceso. Costo: en un disco efímero (Render free) se pierden al reiniciar. |
 | **Render de Markdown propio en el front (subconjunto)** | `react-markdown` + `remark-gfm` | Las respuestas solo usan tablas, títulos, listas, negrita y código; ~100 líneas sin dependencias y sin HTML crudo (React escapa todo, sin superficie de inyección desde el texto del modelo). |
-| **Mantener el `Contrato` completo como argumento de `validar`/`registrar`** | Pasar solo `mensaje_id` + correcciones | Es el contrato de herramientas del PRD. Costo: más tokens y el modelo puede omitir campos `null`; se mitigó con valores por defecto en el esquema (los errores de validación además vuelven al modelo, que se corrige). |
+| **Mantener el `Contrato` completo como argumento de `validar`/`registrar`** | Pasar solo `mensaje_id` + correcciones | Es el contrato de herramientas del PRD. Costo: más tokens y el modelo puede omitir campos `null` o mandar `evidencia: null`; el esquema los tolera y los errores de validación vuelven al modelo, que debe reintentar. |
 
 **Dependencias** (todas justificadas): `zod` (obligatorio; además genera el JSON Schema que ve el modelo y valida la configuración y la API), `hono` (enrutador HTTP y archivos estáticos sobre Bun, pequeño y tipado), `react`/`react-dom` + `vite` + `@vitejs/plugin-react` (front), `typescript` y `@types/bun` (desarrollo). Sin SDK de LLM.
 
@@ -178,7 +178,7 @@ Se usaron **agentes de Cursor con modelos Claude** para:
 
 - **Diagnóstico**: contrastar la versión anterior (LangGraph en `langgraph_app/`) con el PRD y decidir reconstruir sobre un núcleo de herramientas propio.
 - **Implementación**: fase 1 (dominio, extractor, reglas, almacenamiento, herramientas, `demo.ts`, pruebas) y fase 2 (adaptador LLM, ciclo del agente, API, front, módulo, despliegue), con commits pequeños y pruebas en cada paso.
-- **Verificación**: ejecución real contra Gemini, que destapó dos problemas corregidos: el modelo a veces no intenta `registrar` y solo pregunta (la confirmación pasó a detectarse también desde `validar`), y omite campos `null` al reenviar el contrato (valores por defecto en el esquema).
+- **Verificación**: ejecución real contra Gemini, que destapó dos problemas corregidos: el modelo a veces no intenta `registrar` y solo pregunta (la confirmación pasó a detectarse también desde `validar`), y al reenviar el contrato omite campos `null` o manda `evidencia: null` (el esquema ahora los tolera y el prompt pide reintentar ante argumentos inválidos).
 - **Documentación**: este archivo y el README.
 
 Descartado de lo propuesto: mantener LangGraph (más dependencias y comportamiento difícil de defender línea a línea), dejar que el modelo extraiga los campos, `react-markdown` para el chat, y confiar solo en el prompt para la confirmación humana.

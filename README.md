@@ -53,7 +53,7 @@ Todas opcionales; ver [`.env.example`](.env.example). La clave solo vive en el b
 
 ```bash
 bun install && bun run demo.ts   # procesa los 6 mensajes llamando directo a las herramientas
-bun test                         # 66 pruebas: extracción, reglas, herramientas, ciclo, API, módulo
+bun test                         # 67 pruebas: extracción, reglas, herramientas, ciclo, API, módulo
 bun run typecheck                # backend + front
 ```
 
