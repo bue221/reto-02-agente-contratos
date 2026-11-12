@@ -7,6 +7,7 @@ WORKDIR /app
 COPY package.json bun.lock ./
 COPY api/package.json api/package.json
 COPY web/package.json web/package.json
+COPY studio/package.json studio/package.json
 RUN bun install --frozen-lockfile
 
 FROM dependencias AS front
@@ -21,6 +22,7 @@ ENV NODE_ENV=production \
 COPY package.json bun.lock ./
 COPY api/package.json api/package.json
 COPY web/package.json web/package.json
+COPY studio/package.json studio/package.json
 RUN bun install --frozen-lockfile --production
 COPY api/src api/src
 COPY agent agent

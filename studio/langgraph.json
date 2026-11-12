@@ -1,0 +1,9 @@
+{
+  "node_version": "22",
+  "graphs": {
+    "recepcionista": "./src/receptionist-graph.ts:graph",
+    "motor": "./src/engine-graph.ts:graph"
+  },
+  "env": "../.env",
+  "dependencies": ["."]
+}

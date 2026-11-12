@@ -55,7 +55,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Typecheck de la API
-        run: bun run --cwd api typecheck
+        run: bun run --cwd api typecheck && bun run --cwd studio typecheck
 
       - name: Módulo sincronizado con agent/ y el conocimiento
         run: bun run sync:module --check

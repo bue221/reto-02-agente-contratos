@@ -1,0 +1,21 @@
+{
+  "name": "agente-contratos-studio",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Los dos grafos del agente (recepcionista y motor) en LangGraph.js, solo para verlos y probarlos en LangGraph Studio.",
+  "scripts": {
+    "studio": "langgraphjs dev",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "devDependencies": {
+    "@langchain/core": "^1.4.0",
+    "@langchain/langgraph": "^1.7.3",
+    "@langchain/langgraph-checkpoint": "^1.2.2",
+    "@langchain/langgraph-cli": "^1.7.1",
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.9.0",
+    "zod": "^4.1.0"
+  }
+}
