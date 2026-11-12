@@ -1,0 +1,25 @@
+# Secretos
+.env
+.env.*
+!.env.example
+langgraph_app/.env
+
+# Dependencias y builds
+node_modules/
+web/dist/
+dist/
+*.tsbuildinfo
+
+# Salidas generadas en ejecución
+out/
+output/
+output-langgraph/
+.langgraph_api/
+
+# Fixtures inventados de una versión anterior (reemplazados por los oficiales)
+fixtures-legacy/
+
+# Sistema / editor
+.DS_Store
+.idea/
+coverage/

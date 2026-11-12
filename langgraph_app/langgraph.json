@@ -1,0 +1,10 @@
+{
+  "node_version": "22",
+  "graphs": {
+    "pipeline": "./src/graph.ts:graph",
+    "resolucion": "./src/hitl/resolucion-graph.ts:graph",
+    "chat": "./src/agent/chat-graph.ts:graph"
+  },
+  "env": ".env",
+  "dependencies": ["."]
+}
