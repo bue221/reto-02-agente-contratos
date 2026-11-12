@@ -54,8 +54,9 @@ jobs:
       - name: Instalar dependencias
         run: bun install --frozen-lockfile
 
-      - name: Typecheck de la API
-        run: bun run --cwd api typecheck && bun run --cwd studio typecheck
+      # `vite build` no revisa tipos: sin este paso un error de tipos en web/ llegaría a la imagen.
+      - name: Typecheck de api, web y studio
+        run: bun run typecheck
 
       - name: Módulo sincronizado con agent/ y el conocimiento
         run: bun run sync:module --check
