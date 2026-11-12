@@ -10,6 +10,7 @@
     "start": "bun run src/server.ts",
     "build": "bun run --cwd web build",
     "demo": "bun run demo.ts",
+    "sync:modulo": "bun run scripts/sync-modulo.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p web"
   },
