@@ -56,10 +56,20 @@ async function registrarLogSinLanzar(rutas: Rutas, herramienta: string, args: un
   }
 }
 
+/** Resumen legible por herramienta, fuera del objeto para respetar los tres miembros del contrato (PRD 6.2). */
+const resumidores = new WeakMap<object, (json: string) => string>();
+
+/** Mismo resumen que va a `out/log.jsonl`, para mostrar la llamada en el chat (CA4). */
+export function resumirResultado(herramienta: HerramientaGenerica, json: string): string {
+  const resumir = resumidores.get(herramienta);
+  if (resumir) return resumir(json);
+  return json.slice(0, 200);
+}
+
 /** Valida argumentos con zod, ejecuta sin lanzar y deja traza en `out/log.jsonl` (un solo punto: DRY). */
 export function definirHerramienta<A extends z.ZodRawShape, T>(definicion: Definicion<A, T>): Herramienta<A> {
   const esquema = z.object(definicion.args);
-  return {
+  const herramienta: Herramienta<A> = {
     description: definicion.description,
     args: definicion.args,
     async execute(args, ctx) {
@@ -73,6 +83,12 @@ export function definirHerramienta<A extends z.ZodRawShape, T>(definicion: Defin
       return JSON.stringify(resultado);
     },
   };
+  resumidores.set(herramienta, (json) => {
+    // El JSON lo produjo esta misma herramienta: su forma es Resultado<T>.
+    const resultado = JSON.parse(json) as Resultado<T>;
+    return resultado.ok ? definicion.resumir(resultado.data) : resultado.error;
+  });
+  return herramienta;
 }
 
 export async function herramientaDesconocida(nombre: string, ctx: ContextoHerramienta, disponibles: string[]): Promise<string> {

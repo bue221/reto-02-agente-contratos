@@ -8,7 +8,7 @@ import { ContratoSchema } from "../dominio/contrato.ts";
 import { fechaDeHoy } from "../dominio/fechas.ts";
 import { FechaIsoSchema } from "../dominio/maestro.ts";
 import { UMBRAL_CONFIANZA } from "../dominio/parametros.ts";
-import { type ContextoHerramienta, type HerramientaGenerica, definirHerramienta, herramientaDesconocida } from "./herramienta.ts";
+import { type ContextoHerramienta, type HerramientaGenerica, definirHerramienta, herramientaDesconocida, resumirResultado } from "./herramienta.ts";
 
 /** El modelo ve cada export como `contratos_<export>` (PRD 6.2). */
 export const PREFIJO = "contratos";
@@ -87,12 +87,21 @@ export const herramientas: Readonly<Record<string, HerramientaGenerica>> = {
   [nombre("alertas")]: alertas,
 };
 
+const buscarHerramienta = (nombreHerramienta: string): HerramientaGenerica | undefined =>
+  herramientas[nombreHerramienta] ?? herramientas[nombre(nombreHerramienta)];
+
 /**
  * Punto de entrada del ciclo del agente: acepta `contratos_<export>` o `<export>` y argumentos crudos del modelo.
  * Los argumentos se validan con zod dentro de cada herramienta y el error vuelve como `{ ok: false, error }`.
  */
 export function ejecutarHerramienta(nombreHerramienta: string, args: unknown, ctx: ContextoHerramienta): Promise<string> {
-  const herramienta = herramientas[nombreHerramienta] ?? herramientas[nombre(nombreHerramienta)];
+  const herramienta = buscarHerramienta(nombreHerramienta);
   if (!herramienta) return herramientaDesconocida(nombreHerramienta, ctx, Object.keys(herramientas));
   return herramienta.execute(args, ctx);
+}
+
+/** Resumen de una ejecución para el historial del chat; si la herramienta no existe, el propio error. */
+export function resumirEjecucion(nombreHerramienta: string, json: string): string {
+  const herramienta = buscarHerramienta(nombreHerramienta);
+  return herramienta ? resumirResultado(herramienta, json) : (JSON.parse(json) as { error?: string }).error ?? json;
 }
