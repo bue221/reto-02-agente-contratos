@@ -23,3 +23,6 @@ fixtures-legacy/
 .DS_Store
 .idea/
 coverage/
+
+# Vercel CLI
+.vercel/
