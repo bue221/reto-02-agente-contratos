@@ -1,0 +1,14 @@
+**/node_modules
+**/.env
+**/.env.*
+!**/.env.example
+**/.langgraph_api
+**/.cursor
+**/.DS_Store
+.git
+
+output/
+output-langgraph/
+fixtures-legacy/
+web/
+src/

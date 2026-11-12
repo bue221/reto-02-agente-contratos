@@ -35,6 +35,31 @@ bun run studio
 | `bun run smoke:api` | Smoke HTTP |
 | `bun run process` | Demo batch determinista |
 
+## Docker (backend)
+
+El contexto de build es la **raíz del repo** (la API lee `fixtures/reto-02`).
+
+```bash
+# Desde la raíz del repo
+docker compose up --build              # http://127.0.0.1:8787 · usa langgraph_app/.env si existe
+
+# O sin compose
+docker build -f langgraph_app/Dockerfile -t agente-contratos-api .
+docker run -p 8787:8787 -e GOOGLE_API_KEY=AIza... -v agente-data:/app/data agente-contratos-api
+
+# Para AWS (ECS Fargate / App Runner corren en x86 por defecto; en Mac Apple Silicon hay que forzarlo)
+docker build --platform linux/amd64 -f langgraph_app/Dockerfile -t agente-contratos-api .
+```
+
+| Variable | Default en la imagen | Nota |
+|----------|---------------------|------|
+| `GOOGLE_API_KEY` | — | Secreto: inyectar en runtime (en AWS, Secrets Manager), nunca en la imagen |
+| `LLM_PROVIDER` | `auto` | Sin key cae a `offline` |
+| `API_PORT` | `8787` | Puerto del contenedor |
+| `OUT_DIR` | `/app/data` | Maestro, auditoría y propuestas. Es estado en disco: en AWS montar un volumen EFS o se pierde al reiniciar la tarea |
+
+Health check: `GET /health`.
+
 ## LLM intercambiable
 
 ```bash
