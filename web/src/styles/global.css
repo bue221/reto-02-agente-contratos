@@ -140,14 +140,10 @@ h3 {
 }
 
 .brand-mark {
-  display: grid;
-  place-items: center;
+  display: block;
+  flex-shrink: 0;
   width: 32px;
   height: 32px;
-  border-radius: 9px;
-  background: linear-gradient(135deg, var(--accent-hover), var(--accent));
-  color: var(--accent-ink);
-  font-weight: 700;
 }
 
 .brand-name {

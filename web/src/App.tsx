@@ -61,9 +61,7 @@ function BarraLateral({ tab, onTab, contadores, salud, aprobador, onAprobador, r
   return (
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand-mark" aria-hidden="true">
-          C
-        </span>
+        <img className="brand-mark" src="/favicon.svg" alt="" width={32} height={32} />
         <div>
           <p className="brand-name">Contratos</p>
           <p className="brand-sub">Agente de registro</p>
