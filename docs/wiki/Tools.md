@@ -16,12 +16,12 @@ Juntas son la **única fuente de valores** que el agente puede afirmar y la úni
 | `recepcion_consultar_estado` | `{}` | `{ contadores, mensajes[], errores[] }` como `GET /api/buzon` | no |
 | `recepcion_consultar_maestro` | `{ consulta? }` | `{ total, filas[], truncado }` (máx. 25 filas; busca en id, cliente y NIT sin tildes) | no |
 | `recepcion_explicar_validacion` | `{ mensaje_id }` | `{ mensaje, extraccion, validacion, decision, fila, linea_tiempo }` | no |
-| `recepcion_procesar_buzon` | `{ hoy, mensaje_ids? }` | `{ mensajes[], omitidos[], en_revision[], alertas }`; cada mensaje con `desenlace`, `recorrido`, `revision[]` (campo, valor, confianza, evidencia, motivo) y `accion` | ingestar → grafo por mensaje → alertas |
+| `recepcion_procesar_buzon` | `{ hoy, mensaje_ids? }` | `{ mensajes[], omitidos[], en_revision[], alertas }`; cada mensaje con `desenlace`, `recorrido`, `campos` (valor y confianza de cada campo extraído), `revision[]` (campo, valor, confianza, evidencia, motivo) y `accion` | ingestar → grafo por mensaje → alertas |
 | `recepcion_responder_revision` | `{ mensaje_id, decision, correcciones?, motivo?, hoy? }` | `{ mensaje_id, decision, estado, id_contrato, accion, correcciones, cambios, alertas }` | reanuda la pausa |
 
 - `mensaje_ids` omitido procesa todo lo pendiente; `[]` solo regenera alertas; un id no pendiente sale en `omitidos`.
 - `responder_revision` con `decision: "rechazar"` exige `motivo`. El aprobador queda como `chat <sessionId>` y la decisión en `out/decisiones.jsonl` con `via: "chat"`.
-- El contrato completo **no** vuelve al modelo: solo lo que necesita para responder.
+- El contrato completo **no** vuelve al modelo: solo lo que necesita para responder. De cada campo llega su valor y su confianza; la evidencia, solo de los campos en revisión (el resto, con `recepcion_explicar_validacion`).
 - Las llamadas `contratos_*` que hace el motor por debajo van a `ctx.traza` y el chat las muestra como `pasos` de la llamada.
 
 ## Contrato (PRD §6.2)

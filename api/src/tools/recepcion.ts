@@ -6,7 +6,7 @@ import type { ResultadoHitl } from "../application/use-cases/message-status.ts";
 import { type Reanudacion, type Reanudado, reanudarRevision } from "../application/workflows/approval-tray.ts";
 import type { ResultadoMensaje } from "../application/workflows/contract-graph.ts";
 import { type Pasada, ejecutarPasada } from "../application/workflows/process-mailbox.ts";
-import { CorreccionesSchema } from "../core/domain/contract.ts";
+import { CAMPOS_CONTRATO, type CampoContrato, type Contrato, CorreccionesSchema } from "../core/domain/contract.ts";
 import { FechaIsoSchema } from "../core/domain/master.ts";
 import { type Resultado, exito, fallo } from "../core/domain/result.ts";
 import { MensajeIdSchema } from "./args.ts";
@@ -60,12 +60,25 @@ export const explicar_validacion = definirHerramienta({
   resumir: ({ mensaje, validacion }) => `${mensaje.id}: ${mensaje.estado}${validacion ? ` (${validacion.clasificacion})` : ", sin analizar"}`,
 });
 
+export type ConfianzaPorCampo = Record<CampoContrato, Pick<Contrato[CampoContrato], "valor" | "confianza">>;
+
+export interface MensajeReportado extends Omit<ResultadoMensaje, "contrato"> {
+  /** Valor y confianza de cada campo extraído; la evidencia completa queda en `explicar_validacion`. */
+  campos: ConfianzaPorCampo | null;
+}
+
 export interface PasadaReportada extends Omit<Pasada, "mensajes" | "alertas"> {
-  mensajes: Omit<ResultadoMensaje, "contrato">[];
+  mensajes: MensajeReportado[];
   alertas: Alertas | { error: string };
 }
 
-const sinContrato = ({ contrato: _contrato, ...mensaje }: ResultadoMensaje): Omit<ResultadoMensaje, "contrato"> => mensaje;
+const confianzaPorCampo = (contrato: Contrato): ConfianzaPorCampo =>
+  Object.fromEntries(CAMPOS_CONTRATO.map((campo) => [campo, { valor: contrato[campo].valor, confianza: contrato[campo].confianza }])) as ConfianzaPorCampo;
+
+const aReportado = ({ contrato, ...mensaje }: ResultadoMensaje): MensajeReportado => ({
+  ...mensaje,
+  campos: contrato ? confianzaPorCampo(contrato) : null,
+});
 
 function resumirPasada({ mensajes, en_revision, alertas }: PasadaReportada): string {
   const contar = (desenlace: ResultadoMensaje["desenlace"]): number => mensajes.filter((mensaje) => mensaje.desenlace === desenlace).length;
@@ -88,7 +101,7 @@ export const procesar_buzon = definirHerramienta({
   ejecutar: async (args, ctx) => {
     const pasada = await ejecutarPasada(ctx, { hoy: args.hoy, ...(args.mensaje_ids ? { mensajeIds: args.mensaje_ids } : {}) });
     if (!pasada.ok) return pasada;
-    return exito<PasadaReportada>({ ...pasada.data, mensajes: pasada.data.mensajes.map(sinContrato), alertas: alertasVisibles(pasada.data.alertas) });
+    return exito<PasadaReportada>({ ...pasada.data, mensajes: pasada.data.mensajes.map(aReportado), alertas: alertasVisibles(pasada.data.alertas) });
   },
   resumir: resumirPasada,
 });

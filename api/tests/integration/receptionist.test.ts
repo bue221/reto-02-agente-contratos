@@ -68,6 +68,14 @@ describe("recepcion_procesar_buzon: el motor determinista", () => {
     expect(pasada.mensajes.every((mensaje) => !("contrato" in mensaje))).toBe(true);
   });
 
+  test("cada mensaje extraído trae valor y confianza por campo, sin la evidencia", () => {
+    const campos = pasada.mensajes.find((mensaje) => mensaje.mensaje_id === "msg-006")?.campos;
+    expect(Object.keys(campos?.valor ?? {}).sort()).toEqual(["confianza", "valor"]);
+    expect(campos?.valor.confianza).toBeLessThan(0.8);
+    expect(Object.values(campos ?? {}).every((campo) => !("evidencia" in campo))).toBe(true);
+    expect(pasada.mensajes.every((mensaje) => mensaje.campos !== null)).toBe(true);
+  });
+
   test("con mensaje_ids solo procesa esos y reporta los que no están pendientes", async () => {
     const otro = await crearProyecto();
     const { resultado } = await recepcion<PasadaReportada>(otro, "recepcion_procesar_buzon", { hoy: HOY, mensaje_ids: ["msg-001", "msg-001", "msg-999"] });

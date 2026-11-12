@@ -109,6 +109,19 @@ describe("grafo de la recepcionista en LangGraph", () => {
     expect(lineasJson(await leerSalida(ctx, "log.jsonl")).some((entrada) => entrada.herramienta === "recepcion_procesar_buzon" && entrada.ok)).toBe(true);
   });
 
+  test("con mensaje_ids el subgrafo del motor procesa solo ese mensaje y deja el resto pendiente", async () => {
+    const ctx = await crearProyecto();
+    const deps = { directorio: ctx.directory, proveedor: new ProveedorOffline(), maxIteraciones: 25, cargarSistema: async () => "sistema" };
+    const grafo = compilarRecepcion(deps, new MemorySaver());
+
+    const estado = await grafo.invoke({ messages: [new HumanMessage("Procesa el msg-001 con fecha 2026-09-03")] }, hilo("r4"));
+    const visible = estado.messages.find(isToolMessage)?.artifact as { args?: Record<string, unknown>; pasos?: { nombre: string; args: Record<string, unknown> }[] } | undefined;
+    expect(visible?.args).toMatchObject({ mensaje_ids: ["msg-001"] });
+    expect(visible?.pasos?.filter((paso) => paso.nombre === "contratos_extraer").map((paso) => paso.args.mensaje_id)).toEqual(["msg-001"]);
+    const buzon = lineasJson(await leerSalida(ctx, "log.jsonl")).filter((entrada) => entrada.herramienta === "contratos_extraer");
+    expect(buzon.map((entrada) => entrada.mensaje_id)).toEqual(["msg-001"]);
+  });
+
   test("la guarda CA3 también rige en Studio: no se decide sobre un mensaje por el que no se preguntó", async () => {
     const ctx = await crearProyecto();
     const autoaprueba = {
