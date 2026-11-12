@@ -152,6 +152,19 @@ describe("reglas del ciclo", () => {
     expect(await leerSalida(ctx, "procesados.json")).toBe("");
   });
 
+  test("CA3: validar con campos en revisión basta para pedir confirmación aunque el modelo no intente registrar", async () => {
+    const ctx = await crearProyecto();
+    const contrato = await extraerOk(ctx, "msg-006");
+    const cauto = proveedorFijo((llamada) =>
+      llamada === 1 ? pedir({ id: "1", nombre: "contratos_validar", args: { mensaje_id: "msg-006", contrato } }) : texto("¿Confirmas los valores de msg-006?"),
+    );
+    const agente = crearAgente(ctx, cauto);
+    const respuesta = await agente.conversar("s8", "valida msg-006");
+    expect(respuesta.needsConfirmation).toBe(true);
+    expect(respuesta.reply).toBe("¿Confirmas los valores de msg-006?");
+    expect((await new SesionesEnArchivo(ctx.directory).obtener("s8"))?.pendientesConfirmacion).toEqual(["msg-006"]);
+  });
+
   test("CA3: si el modelo olvida preguntar, el ciclo agrega la pregunta explícita", async () => {
     const ctx = await crearProyecto();
     const contrato = await extraerOk(ctx, "msg-006");
