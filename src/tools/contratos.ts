@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { generarAlertas } from "../casos/alertas.ts";
 import { leerBuzon } from "../casos/leer-buzon.ts";
 import { cargarMensaje, extraerDeMensaje } from "../casos/mensaje.ts";
 import { registrarMensaje } from "../casos/registrar.ts";
 import { validarMensaje } from "../casos/validar.ts";
 import { ContratoSchema } from "../dominio/contrato.ts";
 import { fechaDeHoy } from "../dominio/fechas.ts";
+import { FechaIsoSchema } from "../dominio/maestro.ts";
 import { UMBRAL_CONFIANZA } from "../dominio/parametros.ts";
 import { type ContextoHerramienta, type HerramientaGenerica, definirHerramienta, herramientaDesconocida } from "./herramienta.ts";
 
@@ -68,11 +70,21 @@ export const registrar = definirHerramienta({
   resumir: (registro) => `${registro.accion} ${registro.id_contrato ?? ""}`.trim(),
 });
 
+export const alertas = definirHerramienta({
+  nombre: nombre("alertas"),
+  description: "Genera out/alertas.md con contratos que vencen en ≤ 60 días, pólizas requeridas no vigentes y registros desde el corte del maestro.",
+  args: { hoy: FechaIsoSchema.describe("Fecha de referencia YYYY-MM-DD") },
+  ejecutar: (args, ctx, rutas) => generarAlertas(rutas, args.hoy, ctx.directory),
+  resumir: (reporte) =>
+    `${reporte.vencen.length} vencen, ${reporte.polizas_pendientes.length} pólizas pendientes, ${reporte.registrados_desde_corte.length} registrados desde el corte`,
+});
+
 export const herramientas: Readonly<Record<string, HerramientaGenerica>> = {
   [nombre("leer_buzon")]: leer_buzon,
   [nombre("extraer")]: extraer,
   [nombre("validar")]: validar,
   [nombre("registrar")]: registrar,
+  [nombre("alertas")]: alertas,
 };
 
 /**
