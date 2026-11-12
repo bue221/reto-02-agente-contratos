@@ -2,6 +2,8 @@ import type {
   CorreccionesVisibles,
   DetalleMensaje,
   ErrorApi,
+  EventoChat,
+  EventoTurno,
   RespuestaBandeja,
   RespuestaBuzon,
   RespuestaChat,
@@ -12,6 +14,7 @@ import type {
   Salud,
   SesionPublica,
 } from "../../../api/src/http/types";
+import { datosSse } from "./sse";
 
 /** Cliente único de la API. Los tipos vienen del mismo archivo que usa el servidor: backend y front no divergen. */
 
@@ -55,6 +58,32 @@ const id = (valor: string): string => encodeURIComponent(valor);
 export const obtenerSalud = (): Promise<Salud> => pedir<Salud>("/api/health");
 
 export const enviarMensaje = (sessionId: string, message: string): Promise<RespuestaChat> => pedir<RespuestaChat>("/api/chat", { sessionId, message });
+
+/**
+ * El mismo turno que `enviarMensaje`, con sus eventos en vivo. Front y backend se despliegan por separado:
+ * si el backend aún no tiene la ruta (404), el turno no se ejecutó y se reenvía por `/api/chat`.
+ */
+export async function enviarMensajeEnVivo(sessionId: string, message: string, alEvento: (evento: EventoTurno) => void): Promise<RespuestaChat> {
+  let respuesta: Response;
+  try {
+    respuesta = await fetch(`${BASE_API}/api/chat/stream`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId, message }) });
+  } catch {
+    throw new ErrorDeApi("No se pudo contactar al backend. ¿Está corriendo?", "sin_conexion");
+  }
+  if (respuesta.status === 404) return enviarMensaje(sessionId, message);
+  if (!respuesta.ok || !respuesta.body) {
+    const json: unknown = await respuesta.json().catch(() => null);
+    if (esErrorApi(json)) throw new ErrorDeApi(json.error.mensaje, json.error.codigo);
+    throw new ErrorDeApi(`El backend respondió HTTP ${respuesta.status}`, "http");
+  }
+  for await (const datos of datosSse(respuesta.body)) {
+    // El backend serializa `EventoChat` (tipo compartido en api/src/http/types.ts).
+    const evento = JSON.parse(datos) as EventoChat;
+    if (evento.tipo === "fin") return evento.respuesta;
+    alEvento(evento);
+  }
+  throw new ErrorDeApi("La conexión se cortó antes de terminar el turno. El agente pudo haberlo completado: abre de nuevo la sesión para ver el resultado.", "turno_cortado");
+}
 
 /** Una sesión que aún no existe (o se borró al reiniciar la demo) es simplemente un chat vacío. */
 export async function obtenerSesion(sessionId: string): Promise<SesionPublica | null> {

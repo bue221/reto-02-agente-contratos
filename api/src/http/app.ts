@@ -3,6 +3,7 @@ import { join, relative } from "node:path";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { cors } from "hono/cors";
+import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import type { AgenteContratos } from "../agent/loop.ts";
 import { type AlmacenSesiones, ID_SESION, type Sesion } from "../agent/sessions.ts";
@@ -12,7 +13,7 @@ import { rutasDelProyecto } from "../infrastructure/paths.ts";
 import { mensajeDeError } from "../core/domain/result.ts";
 import { type DependenciasHitl, rutasHitl } from "./hitl.ts";
 import { errorApi, leerCuerpo } from "./helpers.ts";
-import type { PeticionChat, RespuestaChat, RespuestaMaestro, Salud } from "./types.ts";
+import type { EventoChat, PeticionChat, RespuestaChat, RespuestaMaestro, Salud } from "./types.ts";
 
 /** API HTTP (PRD 6.4): chat, buzón y bandeja. Sin estado propio: delega en el agente, los casos de uso y el almacén. */
 
@@ -30,6 +31,8 @@ export interface DependenciasApi {
 }
 
 const MAX_LONGITUD_MENSAJE = 4000;
+/** Un comentario SSE periódico mantiene viva la conexión mientras el modelo piensa (proxies y balanceadores cortan lo inactivo). */
+const LATIDO_MS = 15_000;
 
 const PeticionChatSchema = z.object({
   sessionId: z.string().regex(ID_SESION, "solo letras, números, '-' y '_' (máx. 64)"),
@@ -44,6 +47,32 @@ function rutasDelChat(app: Hono, deps: DependenciasApi, acceso: AccesoOut): void
     if (!peticion.ok) return peticion.respuesta;
     const { sessionId, message } = peticion.data;
     return c.json<RespuestaChat>(await acceso.compartido(() => deps.agente.conversar(sessionId, message)));
+  });
+
+  /** El mismo turno que `/api/chat`, con sus eventos en vivo; un cuerpo inválido sigue siendo un 400 JSON. */
+  app.post("/api/chat/stream", async (c) => {
+    const peticion = await leerCuerpo(c, PeticionChatSchema);
+    if (!peticion.ok) return peticion.respuesta;
+    const { sessionId, message } = peticion.data;
+    return streamSSE(c, async (stream) => {
+      // Escrituras en cola para conservar el orden. Si el cliente se desconecta, el turno termina igual y queda en la sesión.
+      let cola = Promise.resolve();
+      const escribir = (escritura: () => Promise<unknown>): void => {
+        cola = cola.then(escritura).then(
+          () => undefined,
+          () => undefined,
+        );
+      };
+      const emitir = (evento: EventoChat): void => escribir(() => stream.writeSSE({ data: JSON.stringify(evento) }));
+      const latido = setInterval(() => escribir(() => stream.write(": latido\n\n")), LATIDO_MS);
+      try {
+        const respuesta = await acceso.compartido(() => deps.agente.conversar(sessionId, message, emitir));
+        emitir({ tipo: "fin", respuesta });
+        await cola;
+      } finally {
+        clearInterval(latido);
+      }
+    });
   });
 
   app.get("/api/sessions/:id", async (c) => {

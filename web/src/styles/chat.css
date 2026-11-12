@@ -150,6 +150,20 @@
   border-color: var(--danger-line);
 }
 
+.chat-agente .llamada.en-curso {
+  border-left-color: var(--warn);
+}
+
+.chat-agente .estado.en-curso {
+  color: var(--warn);
+  border-color: var(--warn-line);
+  animation: latido 1.2s infinite ease-in-out;
+}
+
+.chat-agente .progreso-turno .pensando {
+  margin-top: 0.35rem;
+}
+
 .chat-agente .etiqueta.confirmado {
   color: var(--warn);
   border-color: var(--warn-line);

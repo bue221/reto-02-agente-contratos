@@ -309,4 +309,13 @@ describe("guardas en el servidor", () => {
     const log = lineasJson(await leerSalida(ctx, "log.jsonl"));
     expect(log.at(-1)).toMatchObject({ herramienta: "guarda_respaldo", ok: false, resumen: "sesión g4: datos sin respaldo: CT-2099-001, 999.999.999" });
   });
+
+  test("un observador del streaming que falla no interrumpe el turno", async () => {
+    const ctx = await crearProyecto();
+    const respuesta = await crearAgente(ctx, new ProveedorOffline()).conversar("obs", PROMPT_DEMO, () => {
+      throw new Error("el cliente cerró la conexión");
+    });
+    expect(respuesta.needsConfirmation).toBe(true);
+    expect(pasos(respuesta).length).toBeGreaterThan(5);
+  });
 });

@@ -1,8 +1,10 @@
 import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
-import { type TurnoSesion, enviarMensaje, obtenerSesion } from "../lib/api";
+import { ErrorDeApi, type TurnoSesion, enviarMensajeEnVivo, obtenerSesion } from "../lib/api";
 import { mensajeDeFalla } from "../lib/format";
+import { PROGRESO_INICIAL, type ProgresoTurno, aplicarEvento } from "../lib/turn-progress";
 import { ToolCallList } from "../components/ToolCallList";
 import { MarkdownText } from "../components/MarkdownText";
+import { TurnProgress } from "../components/TurnProgress";
 
 const PROMPT_DEMO =
   "Procesa el buzón de contratos con fecha de hoy 2026-09-03. Registra lo que esté limpio, muéstrame lo que requiere revisión campo por campo y termina con el reporte de alertas. No registres nada dudoso sin preguntarme.";
@@ -33,6 +35,7 @@ type Props = {
 export function ChatView({ sessionId, onNuevaSesion, onTurno }: Props) {
   const [turnos, setTurnos] = useState<TurnoSesion[]>([]);
   const [pendiente, setPendiente] = useState<string | null>(null);
+  const [progreso, setProgreso] = useState<ProgresoTurno>(PROGRESO_INICIAL);
   const [error, setError] = useState<string | null>(null);
   const [texto, setTexto] = useState("");
   const finRef = useRef<HTMLDivElement>(null);
@@ -50,22 +53,27 @@ export function ChatView({ sessionId, onNuevaSesion, onTurno }: Props) {
 
   useEffect(() => {
     finRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [turnos, pendiente]);
+  }, [turnos, pendiente, progreso]);
 
   const enviar = useCallback(
     async (mensaje: string) => {
       const limpio = mensaje.trim();
       if (!limpio || pendiente) return;
       setPendiente(limpio);
+      setProgreso(PROGRESO_INICIAL);
       setError(null);
       setTexto("");
+      // Si mientras tanto se reinició la demo o se abrió otra sesión, lo que llegue ya no pertenece a esta vista.
+      const sigueVigente = (): boolean => sesionActual.current === sessionId;
       try {
-        const respuesta = await enviarMensaje(sessionId, limpio);
-        // Si mientras tanto se reinició la demo o se abrió otra sesión, la respuesta ya no pertenece a esta vista.
-        if (sesionActual.current === sessionId) setTurnos((previos) => [...previos, { ts: new Date().toISOString(), usuario: limpio, respuesta }]);
+        const respuesta = await enviarMensajeEnVivo(sessionId, limpio, (evento) => {
+          if (sigueVigente()) setProgreso((previo) => aplicarEvento(previo, evento));
+        });
+        if (sigueVigente()) setTurnos((previos) => [...previos, { ts: new Date().toISOString(), usuario: limpio, respuesta }]);
       } catch (falla) {
         setError(mensajeDeFalla(falla));
-        setTexto(limpio);
+        // Un turno cortado a medias pudo haberse ejecutado: no se ofrece reenviarlo tal cual.
+        if (!(falla instanceof ErrorDeApi && falla.codigo === "turno_cortado")) setTexto(limpio);
       } finally {
         setPendiente(null);
         onTurno();
@@ -114,12 +122,7 @@ export function ChatView({ sessionId, onNuevaSesion, onTurno }: Props) {
         {pendiente && (
           <>
             <div className="burbuja usuario">{pendiente}</div>
-            <div className="pensando" role="status">
-              <span className="punto" />
-              <span className="punto" />
-              <span className="punto" />
-              El agente está pensando y llamando herramientas…
-            </div>
+            <TurnProgress progreso={progreso} />
           </>
         )}
         {error && (

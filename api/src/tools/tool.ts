@@ -12,6 +12,8 @@ export interface ContextoHerramienta {
   hoy?: string;
   /** Llamadas que hace el motor determinista por debajo de una herramienta del chat: se muestran anidadas (CA4). */
   traza?: LlamadaVisible[];
+  /** Aviso en vivo de cada paso del motor (streaming del chat). No debe lanzar. */
+  alPaso?: (paso: LlamadaVisible) => void;
 }
 
 /** Forma que exige el PRD 6.2. `execute` nunca lanza y siempre devuelve `{ ok, data | error }` serializado. */

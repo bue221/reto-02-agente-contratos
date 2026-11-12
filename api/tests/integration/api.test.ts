@@ -3,7 +3,7 @@ import type { Hono } from "hono";
 import { AgenteContratos } from "../../src/agent/loop.ts";
 import { SesionesEnArchivo } from "../../src/agent/sessions.ts";
 import { crearApp } from "../../src/http/app.ts";
-import type { ErrorApi, RespuestaChat, Salud, SesionPublica } from "../../src/http/types.ts";
+import type { ErrorApi, EventoChat, RespuestaChat, Salud, SesionPublica } from "../../src/http/types.ts";
 import { leerConfiguracion } from "../../src/config.ts";
 import { crearProveedor } from "../../src/llm/factory.ts";
 import { HOY, crearProyecto } from "../helpers.ts";
@@ -72,6 +72,36 @@ describe("API del chat", () => {
     expect(chat.toolCalls).toHaveLength(1);
     expect(chat.toolCalls[0]).toMatchObject({ nombre: "recepcion_procesar_buzon", args: { hoy: "2026-09-03" }, ok: true });
     expect(chat.toolCalls[0]?.pasos?.[0]).toEqual({ nombre: "contratos_leer_buzon", args: {}, ok: true, resumen: "6 pendientes: msg-001, msg-002, msg-003, msg-004, msg-005, msg-006" });
+  });
+
+  test("POST /api/chat/stream emite el turno en vivo y termina con la misma respuesta que /api/chat", async () => {
+    const respuesta = await app.request("/api/chat/stream", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: "api-stream", message: "Procesa el buzón con fecha de hoy 2026-09-03" }),
+    });
+    expect(respuesta.status).toBe(200);
+    expect(respuesta.headers.get("content-type")).toContain("text/event-stream");
+    const eventos = (await respuesta.text())
+      .split("\n")
+      .filter((linea) => linea.startsWith("data: "))
+      .map((linea) => JSON.parse(linea.slice("data: ".length)) as EventoChat);
+    expect(eventos.map((evento) => evento.tipo).filter((tipo, i, tipos) => tipo !== tipos[i - 1])).toEqual(["modelo", "herramienta", "paso", "resultado", "modelo", "fin"]);
+    const pasos = eventos.flatMap((evento) => (evento.tipo === "paso" ? [evento.paso.nombre] : []));
+    expect(pasos[0]).toBe("contratos_leer_buzon");
+    expect(pasos.at(-1)).toBe("contratos_alertas");
+    const fin = eventos.at(-1);
+    if (fin?.tipo !== "fin") throw new Error("el stream no terminó con fin");
+    expect(fin.respuesta.needsConfirmation).toBe(true);
+    expect(fin.respuesta.toolCalls[0]?.pasos?.map((paso) => paso.nombre)).toEqual(pasos);
+    const sesion = (await (await app.request("/api/sessions/api-stream")).json()) as SesionPublica;
+    expect(sesion.turnos[0]?.respuesta).toEqual(fin.respuesta);
+  });
+
+  test("POST /api/chat/stream con un cuerpo inválido es un 400 JSON, no un stream", async () => {
+    const respuesta = await app.request("/api/chat/stream", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: "x" }) });
+    expect(respuesta.status).toBe(400);
+    expect(((await respuesta.json()) as ErrorApi).error.codigo).toBe("peticion_invalida");
   });
 
   test("GET /api/sessions/:id devuelve el historial y 404 si no existe", async () => {

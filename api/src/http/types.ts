@@ -23,6 +23,16 @@ export interface PeticionChat {
   message: string;
 }
 
+/** Lo que pasa mientras corre un turno: llamada al modelo, herramienta iniciada, paso del motor y herramienta terminada. */
+export type EventoTurno =
+  | { tipo: "modelo"; iteracion: number }
+  | { tipo: "herramienta"; nombre: string; args: Record<string, unknown> }
+  | { tipo: "paso"; paso: LlamadaVisible }
+  | { tipo: "resultado"; llamada: LlamadaVisible };
+
+/** Eventos de `POST /api/chat/stream` (SSE), en orden. El último es siempre `fin`, con la misma respuesta que `/api/chat`. */
+export type EventoChat = EventoTurno | { tipo: "fin"; respuesta: RespuestaChat };
+
 export interface TurnoSesion {
   ts: string;
   usuario: string;

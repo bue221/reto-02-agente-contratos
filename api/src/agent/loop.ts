@@ -1,4 +1,4 @@
-import type { LlamadaVisible, RespuestaChat } from "../http/types.ts";
+import type { EventoTurno, LlamadaVisible, RespuestaChat } from "../http/types.ts";
 import { mensajeDeError } from "../core/domain/result.ts";
 import { type DefinicionHerramienta, type MensajeLlm, type ProveedorLlm, type RespuestaLlm, type UsoTokens, totalTokens } from "../llm/adapter.ts";
 import type { ContextoHerramienta } from "../tools/tool.ts";
@@ -40,10 +40,25 @@ export interface DependenciasCiclo {
   clasificador?: ClasificadorDeAlcance | undefined;
 }
 
+/** Recibe en vivo lo que pasa en el turno (streaming del chat); `fin` lo emite quien llama, con la respuesta. */
+export type ObservadorTurno = (evento: EventoTurno) => void;
+
+/** Un observador que falla (p. ej. el cliente cerró la conexión) no puede interrumpir el turno. */
+const observadorSeguro =
+  (observador: ObservadorTurno | undefined): ObservadorTurno =>
+  (evento) => {
+    try {
+      observador?.(evento);
+    } catch (error) {
+      console.error(`[agente] no se pudo avisar el evento ${evento.tipo}: ${mensajeDeError(error)}`);
+    }
+  };
+
 /** Estado de un turno en curso: lo que el chat mostrará y lo que decide la confirmación (CA3). */
 interface Turno {
   sesion: Sesion;
   ctx: ContextoHerramienta;
+  avisar: ObservadorTurno;
   llamadas: LlamadaVisible[];
   pendientesAlInicio: ReadonlySet<string>;
   nuevasPendientes: Set<string>;
@@ -67,14 +82,14 @@ export class AgenteContratos {
   }
 
   /** Nunca lanza (CA5): cualquier fallo vuelve como respuesta legible y la sesión sigue utilizable. */
-  conversar(sessionId: string, mensaje: string): Promise<RespuestaChat> {
-    return this.#cerrojo.ejecutar(sessionId, () => this.#turno(sessionId, mensaje));
+  conversar(sessionId: string, mensaje: string, observador?: ObservadorTurno): Promise<RespuestaChat> {
+    return this.#cerrojo.ejecutar(sessionId, () => this.#turno(sessionId, mensaje, observadorSeguro(observador)));
   }
 
-  async #turno(sessionId: string, mensaje: string): Promise<RespuestaChat> {
+  async #turno(sessionId: string, mensaje: string, avisar: ObservadorTurno): Promise<RespuestaChat> {
     const sesion = (await this.#deps.sesiones.obtener(sessionId)) ?? nuevaSesion(sessionId);
     sesion.pendientesConfirmacion = await pendientesVigentes(this.#deps.directorio, sesion.pendientesConfirmacion);
-    const respuesta = (await this.#respuestaBloqueada(sesion, mensaje)) ?? (await this.#atender(sesion, mensaje));
+    const respuesta = (await this.#respuestaBloqueada(sesion, mensaje)) ?? (await this.#atender(sesion, mensaje, avisar));
     sesion.turnos.push({ ts: new Date().toISOString(), usuario: mensaje, respuesta });
     sesion.actualizada = new Date().toISOString();
     await this.#deps.sesiones.guardar(sesion);
@@ -94,17 +109,19 @@ export class AgenteContratos {
     return { reply: respuestaDeBloqueo(bloqueo, sesion.pendientesConfirmacion), toolCalls: [], needsConfirmation: false };
   }
 
-  async #atender(sesion: Sesion, mensaje: string): Promise<RespuestaChat> {
-    const turno = this.#iniciarTurno(sesion, mensaje);
+  async #atender(sesion: Sesion, mensaje: string, avisar: ObservadorTurno): Promise<RespuestaChat> {
+    const turno = this.#iniciarTurno(sesion, mensaje, avisar);
     const texto = await this.#resolver(turno).catch((error: unknown) => `Ocurrió un error interno: ${mensajeDeError(error)}. Puedes volver a intentarlo.`);
     return this.#cerrarTurno(turno, texto);
   }
 
-  #iniciarTurno(sesion: Sesion, mensaje: string): Turno {
+  #iniciarTurno(sesion: Sesion, mensaje: string, avisar: ObservadorTurno): Turno {
     sesion.mensajes.push({ rol: "usuario", texto: mensaje });
+    const alPaso = (paso: LlamadaVisible): void => avisar({ tipo: "paso", paso });
     return {
       sesion,
-      ctx: { directory: this.#deps.directorio, sessionId: sesion.id, ...(this.#deps.hoy ? { hoy: this.#deps.hoy } : {}) },
+      ctx: { directory: this.#deps.directorio, sessionId: sesion.id, alPaso, ...(this.#deps.hoy ? { hoy: this.#deps.hoy } : {}) },
+      avisar,
       llamadas: [],
       pendientesAlInicio: new Set(sesion.pendientesConfirmacion),
       nuevasPendientes: new Set(),
@@ -125,6 +142,7 @@ export class AgenteContratos {
     for (let iteracion = 0; iteracion < maxIteraciones; iteracion++) {
       const tope = this.#topeDeTokens(turno.sesion);
       if (tope) return tope;
+      turno.avisar({ tipo: "modelo", iteracion: iteracion + 1 });
       const respuesta = await this.#deps.proveedor.enviar([{ rol: "sistema", texto: sistema }, ...turno.sesion.mensajes], this.#definiciones);
       if (!respuesta.ok) return errorDeProveedor(this.#deps.proveedor, respuesta.error);
       this.#contarTokens(turno.sesion, respuesta.data.uso);
@@ -146,9 +164,11 @@ export class AgenteContratos {
   async #ejecutarLlamadas(turno: Turno, respuesta: RespuestaLlm): Promise<void> {
     turno.sesion.mensajes.push({ rol: "asistente", texto: respuesta.texto, llamadas: respuesta.llamadas });
     for (const llamada of respuesta.llamadas) {
+      turno.avisar({ tipo: "herramienta", nombre: llamada.nombre, args: llamada.args });
       const ejecutada = await ejecutarLlamada(llamada, turno.ctx, turno.pendientesAlInicio);
       turno.sesion.mensajes.push({ rol: "herramienta", id: llamada.id, nombre: llamada.nombre, resultado: ejecutada.json });
       turno.llamadas.push(ejecutada.visible);
+      turno.avisar({ tipo: "resultado", llamada: ejecutada.visible });
       for (const id of ejecutada.efecto.enRevision) turno.nuevasPendientes.add(id);
       for (const id of ejecutada.efecto.resueltos) turno.resueltos.add(id);
     }
