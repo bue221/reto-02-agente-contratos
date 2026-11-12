@@ -1,75 +1,62 @@
-import { CSV_URL, type Contrato, type Propuesta } from "../api";
+import { type DecisionVisible, type FilaMaestroVisible, URL_MAESTRO_CSV } from "../api";
+import { mostrarValor } from "../formato";
 
-const COLUMNAS: { key: keyof Contrato; label: string }[] = [
-  { key: "id_contrato", label: "ID" },
-  { key: "cliente", label: "Cliente" },
-  { key: "nit", label: "NIT" },
-  { key: "valor", label: "Valor" },
-  { key: "moneda", label: "Moneda" },
-  { key: "fecha_inicio", label: "Inicio" },
-  { key: "fecha_fin", label: "Fin" },
-  { key: "comercial_email", label: "Comercial" },
-  { key: "estado", label: "Estado" },
-  { key: "archivo", label: "Archivo" },
-  { key: "actualizado_en", label: "Actualizado" },
+type Columna = keyof FilaMaestroVisible;
+
+const COLUMNAS: readonly { columna: Columna; etiqueta: string }[] = [
+  { columna: "id_contrato", etiqueta: "ID" },
+  { columna: "cliente", etiqueta: "Cliente" },
+  { columna: "nit_cliente", etiqueta: "NIT" },
+  { columna: "pais", etiqueta: "País" },
+  { columna: "valor", etiqueta: "Valor" },
+  { columna: "moneda", etiqueta: "Moneda" },
+  { columna: "fecha_inicio", etiqueta: "Inicio" },
+  { columna: "fecha_fin", etiqueta: "Fin" },
+  { columna: "estado_poliza", etiqueta: "Póliza" },
+  { columna: "comercial", etiqueta: "Comercial" },
+  { columna: "ruta_sharepoint", etiqueta: "Archivo" },
+  { columna: "fecha_registro", etiqueta: "Registro" },
+  { columna: "fuente", etiqueta: "Fuente" },
 ];
 
-type Marca = { tipo: "nuevo" | "modificado"; msgId: string; aprobador: string; cambios: Set<string> };
+const SIN_CORTE: ReadonlySet<Columna> = new Set(["id_contrato", "fecha_inicio", "fecha_fin", "fecha_registro"]);
 
-/** Qué filas tocó una aprobación humana: solo lectura de propuestas ya resueltas. */
-function marcasPorContrato(propuestas: Propuesta[]): Map<string, Marca> {
+type Marca = { tipo: "nuevo" | "modificado"; decision: DecisionVisible };
+
+/** Filas que escribió una aprobación humana (la más reciente manda). */
+function marcasPorContrato(decisiones: readonly DecisionVisible[]): Map<string, Marca> {
   const marcas = new Map<string, Marca>();
-  for (const p of propuestas) {
-    const r = p.resolucion;
-    if (!r || !r.contratoId) continue;
-    if (r.decisionFinal === "REGISTRAR_NUEVO") {
-      marcas.set(r.contratoId, { tipo: "nuevo", msgId: p.msgId, aprobador: r.aprobador, cambios: new Set() });
-    } else if (r.decisionFinal === "ACTUALIZAR") {
-      marcas.set(r.contratoId, {
-        tipo: "modificado",
-        msgId: p.msgId,
-        aprobador: r.aprobador,
-        cambios: new Set(Object.keys(r.cambios ?? {})),
-      });
-    }
+  for (const decision of [...decisiones].reverse()) {
+    if (!decision.id_contrato || decision.decision !== "aprobado") continue;
+    if (decision.accion === "insertado") marcas.set(decision.id_contrato, { tipo: "nuevo", decision });
+    if (decision.accion === "actualizado") marcas.set(decision.id_contrato, { tipo: "modificado", decision });
   }
   return marcas;
 }
 
-function formatoValor(k: keyof Contrato, v: unknown): string {
-  return k === "valor" && typeof v === "number" ? `$${v.toLocaleString("es-CO")}` : String(v);
-}
-
-function celda(c: Contrato, k: keyof Contrato) {
-  if (k === "valor") return `$${c.valor.toLocaleString("es-CO")}`;
-  if (k === "estado") return <span className={`chip chip-${c.estado}`}>{c.estado}</span>;
-  return String(c[k] ?? "");
-}
-
-export function MaestroView({
-  contratos,
-  propuestas,
-}: {
-  contratos: Contrato[];
-  propuestas: Propuesta[];
-}) {
-  const marcas = marcasPorContrato(propuestas);
-  const cambiosPorContrato = new Map(
-    propuestas
-      .filter((p) => p.resolucion?.contratoId)
-      .map((p) => [p.resolucion!.contratoId!, p.resolucion!.cambios ?? {}]),
+function Celda({ fila, columna, marca }: { fila: FilaMaestroVisible; columna: Columna; marca: Marca | undefined }) {
+  const cambio = marca?.tipo === "modificado" ? marca.decision.cambios[columna] : undefined;
+  const contenido = columna === "estado_poliza" ? <span className={`chip chip-poliza-${fila.estado_poliza}`}>{fila.estado_poliza}</span> : mostrarValor(fila[columna], columna === "valor" ? "valor" : undefined);
+  return (
+    <td className={`${cambio ? "changed" : ""} ${SIN_CORTE.has(columna) ? "nowrap" : ""}`} title={cambio ? `Antes: ${mostrarValor(cambio.antes)}` : undefined}>
+      {contenido}
+      {cambio ? <div className="muted small">antes {mostrarValor(cambio.antes)}</div> : null}
+    </td>
   );
+}
 
+export function MaestroView({ filas, decisiones }: { filas: FilaMaestroVisible[]; decisiones: DecisionVisible[] }) {
+  const marcas = marcasPorContrato(decisiones);
   return (
     <section className="panel">
       <div className="panel-head">
         <div>
           <h2>Contratos registrados</h2>
           <p className="muted small">
-            {contratos.length} contratos · {marcas.size} tocado(s) por aprobaciones humanas
+            out/sharepoint/maestro-contratos.csv · {filas.length} contratos · {marcas.size} escrito(s) por aprobaciones humanas
           </p>
         </div>
-        <a className="button" href={CSV_URL} download="maestro-contratos.csv">
+        <a className="button" href={URL_MAESTRO_CSV} download="maestro-contratos.csv">
           Descargar CSV
         </a>
       </div>
@@ -81,43 +68,28 @@ export function MaestroView({
         <table className="master">
           <thead>
             <tr>
-              {COLUMNAS.map((c) => (
-                <th key={c.key}>{c.label}</th>
+              {COLUMNAS.map(({ columna, etiqueta }) => (
+                <th key={columna}>{etiqueta}</th>
               ))}
               <th>Origen</th>
             </tr>
           </thead>
           <tbody>
-            {contratos.map((c) => {
-              const m = marcas.get(c.id_contrato);
-              const cambios = cambiosPorContrato.get(c.id_contrato) ?? {};
+            {filas.map((fila) => {
+              const marca = marcas.get(fila.id_contrato);
               return (
-                <tr key={c.id_contrato} className={m ? `row-${m.tipo}` : ""}>
-                  {COLUMNAS.map(({ key }) => {
-                    const ch = m?.cambios.has(key) ? cambios[key] : undefined;
-                    return (
-                      <td
-                        key={key}
-                        className={ch ? "changed" : ""}
-                        title={
-                          ch
-                            ? `Antes: ${formatoValor(key, ch.antes)} → ahora: ${formatoValor(key, ch.despues)}`
-                            : undefined
-                        }
-                      >
-                        {celda(c, key)}
-                        {ch ? <div className="muted small">antes {formatoValor(key, ch.antes)}</div> : null}
-                      </td>
-                    );
-                  })}
+                <tr key={fila.id_contrato} className={marca ? `row-${marca.tipo}` : ""}>
+                  {COLUMNAS.map(({ columna }) => (
+                    <Celda key={columna} fila={fila} columna={columna} marca={marca} />
+                  ))}
                   <td className="small">
-                    {m ? (
+                    {marca ? (
                       <>
-                        {m.tipo === "nuevo" ? "Nuevo" : "Modificado"} · {m.msgId}
-                        <div className="muted">por {m.aprobador}</div>
+                        {marca.tipo === "nuevo" ? "Nuevo" : "Modificado"} · {marca.decision.mensaje_id}
+                        <div className="muted">por {marca.decision.aprobador}</div>
                       </>
                     ) : (
-                      <span className="muted">seed</span>
+                      <span className="muted">{fila.fuente === "buzon" ? "buzón (automático)" : fila.fuente}</span>
                     )}
                   </td>
                 </tr>

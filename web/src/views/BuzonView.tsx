@@ -1,62 +1,59 @@
 import { useEffect, useState } from "react";
-import {
-  api,
-  type Campo,
-  type CampoEditable,
-  type CorreoDetalle,
-  type CorreoResumen,
-  type EstadoCorreo,
-} from "../api";
-import { ETIQUETA, PropuestaCard, ResolucionCard } from "../PropuestaCard";
+import { type CorreccionesVisibles, type DetalleMensaje, type MensajeBuzon, api } from "../api";
+import { CAMPOS, ETIQUETA_CAMPO, ETIQUETA_CLASIFICACION, ETIQUETA_ESTADO, type EstadoVisible, UMBRAL_CONFIANZA, fechaHora, mensajeDeFalla, mostrarValor, porcentaje } from "../formato";
+import { PropuestaCard, ResolucionCard } from "../PropuestaCard";
 
-const UMBRAL = 0.8;
+export function EstadoChip({ estado }: { estado: EstadoVisible }) {
+  return <span className={`chip chip-${estado}`}>{ETIQUETA_ESTADO[estado]}</span>;
+}
 
-const ESTADO_LABEL: Record<EstadoCorreo | "ANALIZANDO", string> = {
-  SIN_ANALIZAR: "Sin analizar",
-  PENDIENTE: "Por aprobar",
-  APROBADA: "Aprobado",
-  RECHAZADA: "Rechazado",
-  ANALIZANDO: "Analizando…",
+type Acciones = {
+  busy: boolean;
+  analizando: string | null;
+  onAnalizar: (id: string) => Promise<void>;
+  onAprobar: (id: string, correcciones: CorreccionesVisibles) => Promise<void>;
+  onRechazar: (id: string, motivo: string) => Promise<void>;
 };
 
-const CAMPOS: { key: CampoEditable; label: string }[] = [
-  { key: "idContrato", label: "ID contrato" },
-  { key: "cliente", label: "Cliente" },
-  { key: "nit", label: "NIT" },
-  { key: "valor", label: "Valor" },
-  { key: "fechaInicio", label: "Inicio" },
-  { key: "fechaFin", label: "Fin" },
-];
-
-function mostrar(k: CampoEditable, c: Campo | undefined): string {
-  if (!c || c.valor === null || c.valor === undefined) return "—";
-  if (k === "valor" && typeof c.valor === "number") return `$${c.valor.toLocaleString("es-CO")}`;
-  return String(c.valor);
-}
-
-export function EstadoChip({ estado }: { estado: EstadoCorreo | "ANALIZANDO" }) {
-  return <span className={`chip chip-${estado}`}>{ESTADO_LABEL[estado]}</span>;
-}
-
-type Props = {
-  correos: CorreoResumen[];
+type Props = Acciones & {
+  mensajes: MensajeBuzon[];
   seleccionado: string | null;
   onSeleccionar: (id: string) => void;
-  analizando: string | null;
   progreso: { hechos: number; total: number } | null;
+  /** Cambia tras cada refresco para recargar el detalle abierto. */
   version: number;
-  busy: boolean;
-  onAnalizar: (id: string) => Promise<void>;
   onAnalizarTodo: () => Promise<void>;
   onDetener: () => void;
-  onAprobar: Parameters<typeof PropuestaCard>[0]["onAprobar"];
-  onRechazar: Parameters<typeof PropuestaCard>[0]["onRechazar"];
 };
 
-export function BuzonView(props: Props) {
-  const { correos, seleccionado, analizando, progreso } = props;
-  const sinAnalizar = correos.filter((c) => c.estado === "SIN_ANALIZAR").length;
+function ItemCorreo({ mensaje, activo, analizando, onSeleccionar }: { mensaje: MensajeBuzon; activo: boolean; analizando: boolean; onSeleccionar: () => void }) {
+  return (
+    <li>
+      <button type="button" className={`mail ${activo ? "active" : ""}`} onClick={onSeleccionar}>
+        <span className="mail-top">
+          <b>{mensaje.id}</b>
+          <EstadoChip estado={analizando ? "analizando" : mensaje.estado} />
+        </span>
+        <span className="mail-subject">{mensaje.asunto}</span>
+        <span className="mail-meta">
+          {mensaje.de} · {fechaHora(mensaje.fecha)}
+        </span>
+        <span className="mail-meta">{mensaje.adjuntos.length ? `Adjuntos: ${mensaje.adjuntos.join(", ")}` : "Sin adjuntos"}</span>
+        {mensaje.clasificacion ? (
+          <span className="mail-meta">
+            Agente: {ETIQUETA_CLASIFICACION[mensaje.clasificacion]}
+            {mensaje.id_contrato ? ` [${mensaje.id_contrato}]` : ""}
+            {mensaje.decidido_por ? ` · decidió ${mensaje.decidido_por}` : ""}
+          </span>
+        ) : null}
+      </button>
+    </li>
+  );
+}
 
+export function BuzonView(props: Props) {
+  const { mensajes, seleccionado, analizando, progreso } = props;
+  const sinAnalizar = mensajes.filter((mensaje) => mensaje.estado === "pendiente").length;
   return (
     <div className="buzon-layout">
       <section className="panel mail-list">
@@ -67,12 +64,7 @@ export function BuzonView(props: Props) {
               Detener
             </button>
           ) : (
-            <button
-              type="button"
-              onClick={props.onAnalizarTodo}
-              disabled={props.busy || sinAnalizar === 0}
-              title="Analiza los correos pendientes uno a uno, en orden"
-            >
+            <button type="button" onClick={() => void props.onAnalizarTodo()} disabled={props.busy || sinAnalizar === 0} title="Analiza los correos sin analizar uno a uno, en orden">
               Analizar todo en orden
             </button>
           )}
@@ -88,39 +80,22 @@ export function BuzonView(props: Props) {
           </div>
         ) : null}
         <ul className="mails">
-          {correos.map((c) => (
-            <li key={c.id}>
-              <button
-                type="button"
-                className={`mail ${seleccionado === c.id ? "active" : ""}`}
-                onClick={() => props.onSeleccionar(c.id)}
-              >
-                <span className="mail-top">
-                  <b>{c.id}</b>
-                  <EstadoChip estado={analizando === c.id ? "ANALIZANDO" : c.estado} />
-                </span>
-                <span className="mail-subject">{c.asunto}</span>
-                <span className="mail-meta">
-                  {c.de} · {c.fecha}
-                </span>
-                <span className="mail-meta">
-                  {c.adjuntos.length ? `Adjuntos: ${c.adjuntos.join(", ")}` : "Sin adjuntos"}
-                </span>
-                {c.recomendacion ? (
-                  <span className="mail-meta">
-                    Agente: {ETIQUETA[c.recomendacion]}
-                    {c.decisionFinal ? ` → ${c.decisionFinal}` : ""}
-                    {c.contratoId ? ` [${c.contratoId}]` : ""}
-                  </span>
-                ) : null}
-              </button>
-            </li>
+          {mensajes.map((mensaje) => (
+            <ItemCorreo key={mensaje.id} mensaje={mensaje} activo={seleccionado === mensaje.id} analizando={analizando === mensaje.id} onSeleccionar={() => props.onSeleccionar(mensaje.id)} />
           ))}
         </ul>
       </section>
-
       {seleccionado ? (
-        <CorreoDetalleView key={seleccionado} id={seleccionado} {...props} />
+        <DetalleCorreo
+          key={seleccionado}
+          id={seleccionado}
+          version={props.version}
+          busy={props.busy}
+          analizando={analizando}
+          onAnalizar={props.onAnalizar}
+          onAprobar={props.onAprobar}
+          onRechazar={props.onRechazar}
+        />
       ) : (
         <section className="panel detail empty-detail">
           <p className="empty">Selecciona un correo para ver su contenido y cómo se va resolviendo.</p>
@@ -130,40 +105,161 @@ export function BuzonView(props: Props) {
   );
 }
 
-function CorreoDetalleView({
-  id,
-  version,
-  analizando,
-  busy,
-  onAnalizar,
-  onAprobar,
-  onRechazar,
-}: Props & { id: string }) {
-  const [detalle, setDetalle] = useState<CorreoDetalle | null>(null);
+function LineaDeTiempo({ detalle, analizando }: { detalle: DetalleMensaje; analizando: boolean }) {
+  return (
+    <ol className="timeline">
+      {detalle.linea_tiempo.map((paso, i) => (
+        <li key={paso.id} className={`step step-${analizando && paso.estado === "pendiente" ? "actual" : paso.estado}`} title={paso.ts ? fechaHora(paso.ts) : undefined}>
+          <span className="dot">{i + 1}</span>
+          <span className="step-title">{paso.titulo}</span>
+          {paso.detalle ? <span className="step-detail">{paso.detalle}</span> : null}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function CorreoOriginal({ detalle }: { detalle: DetalleMensaje }) {
+  return (
+    <div className="col">
+      <h3>Correo original</h3>
+      <div className="doc">
+        <div className="doc-label">
+          Para {detalle.para} · Cuerpo
+        </div>
+        <pre>{detalle.cuerpo || "(sin cuerpo)"}</pre>
+      </div>
+      {detalle.adjuntos.map((adjunto) => (
+        <div key={adjunto.nombre} className={`doc ${adjunto.es_contrato ? "used" : ""}`}>
+          <div className="doc-label">
+            Adjunto: {adjunto.nombre}
+            {adjunto.es_contrato ? <span className="muted"> · usado para extraer</span> : null}
+          </div>
+          <pre>{adjunto.texto ?? "(no se pudo leer el adjunto)"}</pre>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TablaExtraccion({ detalle }: { detalle: DetalleMensaje }) {
+  const { extraccion, validacion, fila } = detalle;
+  if (!extraccion) return <p className="muted small">{detalle.error_extraccion ?? "Sin extracción para este correo."}</p>;
+  return (
+    <table className="extract">
+      <thead>
+        <tr>
+          <th>Campo</th>
+          <th>Agente</th>
+          <th>Confianza</th>
+          {fila ? <th>Maestro</th> : null}
+        </tr>
+      </thead>
+      <tbody>
+        {CAMPOS.map(({ campo, etiqueta }) => {
+          const extraido = extraccion[campo];
+          const dudoso = extraido.confianza < UMBRAL_CONFIANZA || validacion?.requiere_revision.includes(campo) === true;
+          const final = fila ? mostrarValor(fila[campo], campo) : null;
+          return (
+            <tr key={campo} className={dudoso ? "low" : ""}>
+              <td>{etiqueta}</td>
+              <td>
+                {mostrarValor(extraido.valor, campo)}
+                {extraido.evidencia && dudoso ? <div className="muted small">“{extraido.evidencia}”</div> : null}
+              </td>
+              <td>
+                <span className="conf-cell">
+                  <span className="bar">
+                    <span style={{ width: porcentaje(extraido.confianza) }} />
+                  </span>
+                  {porcentaje(extraido.confianza)}
+                </span>
+              </td>
+              {final !== null ? <td className={final !== mostrarValor(extraido.valor, campo) ? "changed" : ""}>{final}</td> : null}
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function Validacion({ detalle }: { detalle: DetalleMensaje }) {
+  const { validacion } = detalle;
+  if (!validacion) return null;
+  return (
+    <div className="card-reco">
+      <span className="muted">Clasificación:</span> <b>{ETIQUETA_CLASIFICACION[validacion.clasificacion]}</b>
+      {validacion.id_contrato_existente ? <span className="muted"> ({validacion.id_contrato_existente})</span> : null}
+      <ul>
+        {validacion.motivo ? <li>{validacion.motivo}</li> : null}
+        {validacion.revisiones.map((revision) => (
+          <li key={`${revision.campo}-${revision.motivo}`}>
+            Revisar <b>{ETIQUETA_CAMPO[revision.campo]}</b>: {revision.motivo}
+          </li>
+        ))}
+        {validacion.diferencias.map((diferencia) => (
+          <li key={`dif-${diferencia.campo}`}>
+            {ETIQUETA_CAMPO[diferencia.campo]}: {mostrarValor(diferencia.maestro, diferencia.campo)} → {mostrarValor(diferencia.documento, diferencia.campo)}
+          </li>
+        ))}
+        {validacion.avisos.map((aviso) => (
+          <li key={aviso} className="aviso">
+            {aviso}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function Auditoria({ detalle }: { detalle: DetalleMensaje }) {
+  if (detalle.log.length === 0) return null;
+  return (
+    <details className="rules">
+      <summary>Registro de auditoría ({detalle.log.length} llamada/s en out/log.jsonl)</summary>
+      <ul>
+        {detalle.log.map((entrada, i) => (
+          <li key={`${entrada.ts}-${i}`} className={entrada.ok ? "ok" : "fail"}>
+            {entrada.ok ? "✓" : "✗"} <b>{entrada.herramienta}</b> · {entrada.resumen} <span className="muted">· {fechaHora(entrada.ts)}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function useDetalle(id: string, version: number): { detalle: DetalleMensaje | null; error: string | null; cargando: boolean } {
+  const [detalle, setDetalle] = useState<DetalleMensaje | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
-
   useEffect(() => {
-    let vivo = true;
+    let vigente = true;
     setCargando(true);
     api
-      .correo(id)
-      .then((d) => {
-        if (!vivo) return;
-        setDetalle(d);
+      .detalle(id)
+      .then((respuesta) => {
+        if (!vigente) return;
+        setDetalle(respuesta);
         setError(null);
       })
-      .catch((e) => vivo && setError(String((e as Error).message ?? e)))
-      .finally(() => vivo && setCargando(false));
+      .catch((falla: unknown) => vigente && setError(mensajeDeFalla(falla)))
+      .finally(() => vigente && setCargando(false));
     return () => {
-      vivo = false;
+      vigente = false;
     };
   }, [id, version]);
+  return { detalle, error, cargando };
+}
 
+function DetalleCorreo({ id, version, busy, analizando, onAnalizar, onAprobar, onRechazar }: Acciones & { id: string; version: number }) {
+  const { detalle, error, cargando } = useDetalle(id, version);
   if (error) {
     return (
       <section className="panel detail">
-        <p className="error">No se pudo cargar {id}: {error}</p>
+        <p className="error">
+          No se pudo cargar {id}: {error}
+        </p>
       </section>
     );
   }
@@ -174,194 +270,61 @@ function CorreoDetalleView({
       </section>
     );
   }
-
-  const { correo, propuesta: p, estado, timeline, extraccionOriginal, eventos } = detalle;
-  const agente = extraccionOriginal ?? p?.extraccion ?? null;
-  const final = p?.resolucion ? p.extraccion : null;
+  const { mensaje } = detalle;
   const esteAnalizando = analizando === id;
-
   return (
     <section className={`panel detail ${cargando ? "is-loading" : ""}`}>
       <div className="panel-head">
         <div>
           <h2>
-            {correo.id} · {correo.asunto}
+            {mensaje.id} · {mensaje.asunto}
           </h2>
           <p className="muted small">
-            {correo.de} · {correo.fecha}
+            {mensaje.de} · {fechaHora(mensaje.fecha)}
           </p>
         </div>
         <div className="head-actions">
-          <EstadoChip estado={esteAnalizando ? "ANALIZANDO" : estado} />
-          {estado === "SIN_ANALIZAR" ? (
-            <button type="button" onClick={() => onAnalizar(id)} disabled={busy || !!analizando}>
+          <EstadoChip estado={esteAnalizando ? "analizando" : mensaje.estado} />
+          {mensaje.estado === "pendiente" ? (
+            <button type="button" onClick={() => void onAnalizar(id)} disabled={busy || analizando !== null}>
               Analizar
             </button>
           ) : null}
         </div>
       </div>
-
-      <ol className="timeline">
-        {timeline.map((t, i) => (
-          <li
-            key={t.id}
-            className={`step step-${esteAnalizando && i === 0 ? "actual" : t.estado}`}
-            title={t.ts ? new Date(t.ts).toLocaleString("es-CO") : undefined}
-          >
-            <span className="dot">{i + 1}</span>
-            <span className="step-title">{t.titulo}</span>
-            {t.detalle ? <span className="step-detail">{t.detalle}</span> : null}
-          </li>
-        ))}
-      </ol>
-
+      <LineaDeTiempo detalle={detalle} analizando={esteAnalizando} />
       <div className="side-by-side">
-        <div className="col">
-          <h3>Correo original</h3>
-          <div className="doc">
-            <div className="doc-label">Cuerpo</div>
-            <pre>{correo.cuerpo}</pre>
-          </div>
-          {correo.adjuntos.map((a) => (
-            <div key={a.nombre} className={`doc ${p?.documento === a.nombre ? "used" : ""}`}>
-              <div className="doc-label">
-                Adjunto: {a.nombre}
-                {p?.documento === a.nombre ? <span className="muted"> · usado para extraer</span> : null}
-              </div>
-              <pre>{a.texto}</pre>
-            </div>
-          ))}
-        </div>
-
+        <CorreoOriginal detalle={detalle} />
         <div className="col">
           <h3>Lo que entendió el agente</h3>
-          {p ? (
-            <>
-              <p className="small">
-                Tipo <b>{p.clasificacion.tipo}</b> ({Math.round(p.clasificacion.confianza * 100)}%) ·
-                motor {p.motor}
-                <br />
-                <span className="muted">{p.clasificacion.razon}</span>
-              </p>
-
-              {agente ? (
-                <table className="extract">
-                  <thead>
-                    <tr>
-                      <th>Campo</th>
-                      <th>Agente</th>
-                      <th>Confianza</th>
-                      {final ? <th>Final</th> : null}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {CAMPOS.map(({ key, label }) => {
-                      const c = agente[key];
-                      const conValor = c && c.valor !== null;
-                      const baja = conValor && c.confianza < UMBRAL;
-                      const fin = final ? mostrar(key, final[key]) : null;
-                      const cambio = fin !== null && fin !== mostrar(key, c);
-                      return (
-                        <tr key={key} className={baja ? "low" : ""}>
-                          <td>{label}</td>
-                          <td>
-                            {mostrar(key, c)}
-                            {c?.evidencia && baja ? (
-                              <div className="muted small">“{c.evidencia}”</div>
-                            ) : null}
-                          </td>
-                          <td>
-                            {conValor ? (
-                              <span className="conf-cell">
-                                <span className="bar">
-                                  <span style={{ width: `${Math.round(c.confianza * 100)}%` }} />
-                                </span>
-                                {Math.round(c.confianza * 100)}%
-                              </span>
-                            ) : (
-                              <span className="muted">—</span>
-                            )}
-                          </td>
-                          {final ? <td className={cambio ? "changed" : ""}>{fin}</td> : null}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              ) : (
-                <p className="muted small">Sin extracción (no aplica para este tipo de correo).</p>
-              )}
-
-              <div className="card-reco">
-                <span className="muted">Recomendación:</span> <b>{ETIQUETA[p.recomendacion]}</b>
-                <ul>
-                  {p.motivos.map((m) => (
-                    <li key={m}>{m}</li>
-                  ))}
-                </ul>
-              </div>
-
-              <details className="rules">
-                <summary>
-                  Reglas ({p.validaciones.filter((v) => v.ok).length}/{p.validaciones.length} OK)
-                </summary>
-                <ul>
-                  {p.validaciones.map((v) => (
-                    <li key={v.regla} className={v.ok ? "ok" : "fail"}>
-                      {v.ok ? "✓" : "✗"} <b>{v.regla}</b> · {v.detalle}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </>
+          {mensaje.estado === "pendiente" ? (
+            <p className="empty">{esteAnalizando ? "El agente está analizando este correo…" : "Todavía no se ha analizado. Usa «Analizar» o «Analizar todo en orden»."}</p>
           ) : (
-            <p className="empty">
-              {esteAnalizando
-                ? "El agente está analizando este correo…"
-                : "Todavía no se ha analizado. Usa “Analizar” o “Analizar todo en orden”."}
-            </p>
+            <>
+              <TablaExtraccion detalle={detalle} />
+              <Validacion detalle={detalle} />
+            </>
           )}
         </div>
       </div>
-
-      {p && p.estado === "PENDIENTE" ? (
+      {mensaje.estado === "requiere_revision" && detalle.extraccion && detalle.validacion ? (
         <div className="detail-action">
           <h3>Tu decisión</h3>
           <PropuestaCard
-            key={`${p.msgId}-${p.creadaEn}`}
-            propuesta={p}
+            item={{ mensaje, validacion: detalle.validacion, contrato: detalle.extraccion, desde: "" }}
             disabled={busy}
             onAprobar={onAprobar}
             onRechazar={onRechazar}
           />
         </div>
       ) : null}
-      {p?.resolucion ? (
+      {detalle.decision ? (
         <div className="detail-action">
           <h3>Resultado</h3>
-          <ResolucionCard propuesta={p} />
+          <ResolucionCard decision={detalle.decision} />
         </div>
       ) : null}
-
-      {eventos.length ? (
-        <details className="rules">
-          <summary>Registro de auditoría ({eventos.length} evento/s)</summary>
-          {eventos.map((e) => (
-            <div key={`${e.ts}-${e.fase}`} className="event">
-              <div className="small">
-                <b>{e.fase ?? "evento"}</b> · {e.decision ?? "—"}
-                {e.aprobador ? ` · ${e.aprobador}` : ""} ·{" "}
-                <span className="muted">{new Date(e.ts).toLocaleString("es-CO")}</span>
-              </div>
-              <ul className="small">
-                {e.log.map((l, i) => (
-                  <li key={i}>{l}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </details>
-      ) : null}
+      <Auditoria detalle={detalle} />
     </section>
   );
 }

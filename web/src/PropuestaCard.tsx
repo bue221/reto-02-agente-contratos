@@ -1,214 +1,183 @@
 import { useState } from "react";
-import { ApiError, type CampoEditable, type Decision, type Propuesta } from "./api";
+import type { CampoContratoVisible, CorreccionesVisibles, DecisionVisible, ItemBandeja, ValorCampoVisible } from "./api";
+import { CAMPOS, ETIQUETA_CAMPO, ETIQUETA_CLASIFICACION, UMBRAL_CONFIANZA, fechaHora, mensajeDeFalla, mostrarValor, porcentaje } from "./formato";
 
-const UMBRAL = 0.8;
+type Valores = Record<CampoContratoVisible, string>;
 
-const CAMPOS: { key: CampoEditable; label: string; placeholder: string }[] = [
-  { key: "idContrato", label: "ID contrato", placeholder: "C-001" },
-  { key: "cliente", label: "Cliente", placeholder: "Razón social" },
-  { key: "nit", label: "NIT", placeholder: "900.111.222-3" },
-  { key: "valor", label: "Valor (COP)", placeholder: "60000000" },
-  { key: "fechaInicio", label: "Inicio", placeholder: "YYYY-MM-DD" },
-  { key: "fechaFin", label: "Fin", placeholder: "YYYY-MM-DD" },
-];
+const aTexto = (valor: ValorCampoVisible): string => (valor === null ? "" : String(valor));
 
-export const ETIQUETA: Record<Decision, string> = {
-  REGISTRAR_NUEVO: "Registrar nuevo",
-  ACTUALIZAR: "Actualizar existente",
-  DUPLICADO: "Duplicado",
-  RECHAZAR: "Rechazar",
-  REVISION_HUMANA: "Revisar datos",
-};
+/** Convierte lo escrito al tipo del campo; un número mal escrito se avisa aquí antes de llamar a la API. */
+function aValor(campo: CampoContratoVisible, texto: string): string | number | boolean {
+  if (campo === "valor") {
+    const numero = Number(texto.replace(/[\s.,$]/g, ""));
+    if (!Number.isFinite(numero)) throw new Error("El valor debe ser un número sin separadores (0 si es por demanda).");
+    return numero;
+  }
+  return campo === "requiere_poliza" ? texto === "true" : texto;
+}
 
-const TEXTO_APROBAR: Record<Decision, string> = {
-  REGISTRAR_NUEVO: "Aprobar y registrar",
-  ACTUALIZAR: "Aprobar y actualizar",
-  DUPLICADO: "Aprobar: archivar duplicado",
-  RECHAZAR: "Aprobar rechazo",
-  REVISION_HUMANA: "Confirmar datos y aprobar",
-};
+function correccionesDe(valores: Valores, originales: Valores): CorreccionesVisibles {
+  const correcciones: CorreccionesVisibles = {};
+  for (const { campo } of CAMPOS) {
+    const texto = valores[campo].trim();
+    if (texto && texto !== originales[campo]) correcciones[campo] = aValor(campo, texto);
+  }
+  return correcciones;
+}
 
 type Props = {
-  propuesta: Propuesta;
+  item: ItemBandeja;
   disabled: boolean;
-  onAprobar: (
-    id: string,
-    correcciones: Partial<Record<CampoEditable, string>>,
-    comentario: string,
-  ) => Promise<void>;
-  onRechazar: (id: string, comentario: string) => Promise<void>;
+  onAprobar: (mensajeId: string, correcciones: CorreccionesVisibles) => Promise<void>;
+  onRechazar: (mensajeId: string, motivo: string) => Promise<void>;
 };
 
-export function PropuestaCard({ propuesta: p, disabled, onAprobar, onRechazar }: Props) {
-  const original = (k: CampoEditable) => {
-    const v = p.extraccion?.[k]?.valor;
-    return v === null || v === undefined ? "" : String(v);
-  };
-  const [valores, setValores] = useState<Record<CampoEditable, string>>(() =>
-    Object.fromEntries(CAMPOS.map(({ key }) => [key, original(key)])) as Record<CampoEditable, string>,
+function CampoEditable({ item, campo, valor, bloqueado, onCambio }: { item: ItemBandeja; campo: CampoContratoVisible; valor: string; bloqueado: boolean; onCambio: (texto: string) => void }) {
+  const { confianza } = item.contrato[campo];
+  const enRevision = item.validacion.requiere_revision.includes(campo) || confianza < UMBRAL_CONFIANZA;
+  const editado = valor.trim() !== aTexto(item.contrato[campo].valor);
+  return (
+    <label className={`field ${enRevision ? "low" : ""} ${editado ? "edited" : ""} ${campo === "objeto" ? "wide" : ""}`}>
+      <span className="field-label">
+        {ETIQUETA_CAMPO[campo]}
+        <span className="conf">{porcentaje(confianza)}</span>
+      </span>
+      {campo === "requiere_poliza" ? (
+        <select value={valor} disabled={bloqueado} onChange={(evento) => onCambio(evento.target.value)}>
+          <option value="">—</option>
+          <option value="true">Sí</option>
+          <option value="false">No</option>
+        </select>
+      ) : (
+        <input value={valor} disabled={bloqueado} placeholder={campo.startsWith("fecha") ? "YYYY-MM-DD" : ""} onChange={(evento) => onCambio(evento.target.value)} />
+      )}
+      <span className="bar">
+        <span style={{ width: porcentaje(confianza) }} />
+      </span>
+    </label>
   );
-  const [comentario, setComentario] = useState("");
-  const [error, setError] = useState<{ msg: string; motivos: string[] } | null>(null);
+}
+
+/** Tarjeta de decisión humana: corregir campos y aprobar (registrar con confirmación) o rechazar con motivo. */
+export function PropuestaCard({ item, disabled, onAprobar, onRechazar }: Props) {
+  const { mensaje, validacion, contrato } = item;
+  const originales = Object.fromEntries(CAMPOS.map(({ campo }) => [campo, aTexto(contrato[campo].valor)])) as Valores;
+  const [valores, setValores] = useState<Valores>(originales);
+  const [motivo, setMotivo] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
+  const bloqueado = disabled || enviando;
 
-  const correcciones = Object.fromEntries(
-    CAMPOS.filter(({ key }) => valores[key].trim() && valores[key].trim() !== original(key)).map(
-      ({ key }) => [key, valores[key].trim()],
-    ),
-  ) as Partial<Record<CampoEditable, string>>;
-
-  async function ejecutar(fn: () => Promise<void>) {
+  async function ejecutar(accion: () => Promise<void>): Promise<void> {
     setEnviando(true);
     setError(null);
     try {
-      await fn();
-    } catch (e) {
-      const err = e as ApiError;
-      setError({ msg: err.message, motivos: err.motivos ?? [] });
+      await accion();
+    } catch (falla) {
+      setError(mensajeDeFalla(falla));
     } finally {
       setEnviando(false);
     }
   }
 
-  const bloqueado = disabled || enviando;
+  const aprobar = () => ejecutar(() => onAprobar(mensaje.id, correccionesDe(valores, originales)));
+  const rechazar = () =>
+    ejecutar(async () => {
+      if (!motivo.trim()) throw new Error("Escribe el motivo del rechazo.");
+      await onRechazar(mensaje.id, motivo.trim());
+    });
+  const corregidos = CAMPOS.filter(({ campo }) => valores[campo].trim() && valores[campo].trim() !== originales[campo]).length;
 
   return (
-    <article className={`card rec-${p.recomendacion}`}>
+    <article className="card rec-revision">
       <header className="card-head">
         <div>
-          <strong>{p.msgId}</strong>
-          <span className="muted"> · {p.clasificacion.tipo}</span>
+          <strong>{mensaje.id}</strong>
+          <span className="muted"> · {ETIQUETA_CLASIFICACION[validacion.clasificacion]}</span>
+          {validacion.id_contrato_existente ? <span className="muted"> de {validacion.id_contrato_existente}</span> : null}
         </div>
-        <span className={`pill pill-${p.recomendacion}`}>{ETIQUETA[p.recomendacion]}</span>
+        <span className="pill pill-revision">Revisar datos</span>
       </header>
-
       <p className="card-sub">
-        {p.correo.de} · “{p.correo.asunto}”
+        {mensaje.de} · “{mensaje.asunto}”
       </p>
-
       <div className="card-reco">
-        <span className="muted">El agente recomienda:</span> <b>{ETIQUETA[p.recomendacion]}</b>
-        {p.existenteId ? <span className="muted"> ({p.existenteId})</span> : null}
+        <span className="muted">El agente no registra sin tu confirmación. Campos en revisión:</span>
         <ul>
-          {p.motivos.map((m) => (
-            <li key={m}>{m}</li>
+          {validacion.revisiones.map((revision) => (
+            <li key={`${revision.campo}-${revision.motivo}`}>
+              <b>{ETIQUETA_CAMPO[revision.campo]}</b>: {revision.motivo}
+            </li>
+          ))}
+          {validacion.diferencias.map((diferencia) => (
+            <li key={`dif-${diferencia.campo}`}>
+              {ETIQUETA_CAMPO[diferencia.campo]}: maestro {mostrarValor(diferencia.maestro, diferencia.campo)} → documento {mostrarValor(diferencia.documento, diferencia.campo)}
+            </li>
+          ))}
+          {validacion.avisos.map((aviso) => (
+            <li key={aviso} className="aviso">
+              {aviso}
+            </li>
           ))}
         </ul>
       </div>
-
-      {p.extraccion ? (
-        <div className="fields">
-          {CAMPOS.map(({ key, label, placeholder }) => {
-            const conf = p.extraccion?.[key]?.confianza ?? 0;
-            const tieneValor = original(key) !== "";
-            const baja = tieneValor && conf < UMBRAL;
-            const editado = key in correcciones;
-            return (
-              <label key={key} className={`field ${baja ? "low" : ""} ${editado ? "edited" : ""}`}>
-                <span className="field-label">
-                  {label}
-                  {tieneValor ? (
-                    <span className="conf">{Math.round(conf * 100)}%</span>
-                  ) : (
-                    <span className="conf">vacío</span>
-                  )}
-                </span>
-                <input
-                  value={valores[key]}
-                  placeholder={placeholder}
-                  disabled={bloqueado}
-                  onChange={(e) => setValores((v) => ({ ...v, [key]: e.target.value }))}
-                />
-                {tieneValor ? (
-                  <span className="bar">
-                    <span style={{ width: `${Math.round(conf * 100)}%` }} />
-                  </span>
-                ) : null}
-              </label>
-            );
-          })}
-        </div>
-      ) : null}
-
-      <textarea
-        className="comment"
-        placeholder="Comentario (opcional): por qué apruebas o rechazas"
-        value={comentario}
-        disabled={bloqueado}
-        onChange={(e) => setComentario(e.target.value)}
-        rows={2}
-      />
-
+      <div className="fields">
+        {CAMPOS.map(({ campo }) => (
+          <CampoEditable key={campo} item={item} campo={campo} valor={valores[campo]} bloqueado={bloqueado} onCambio={(texto) => setValores((previos) => ({ ...previos, [campo]: texto }))} />
+        ))}
+      </div>
+      <textarea className="comment" placeholder="Motivo (obligatorio para rechazar)" value={motivo} disabled={bloqueado} onChange={(evento) => setMotivo(evento.target.value)} rows={2} />
       {error ? (
-        <div className="card-error">
-          <b>{error.msg}</b>
-          {error.motivos.length ? (
-            <ul>
-              {error.motivos.map((m) => (
-                <li key={m}>{m}</li>
-              ))}
-            </ul>
-          ) : null}
+        <div className="card-error" role="alert">
+          {error}
         </div>
       ) : null}
-
       <footer className="card-actions">
-        <button
-          type="button"
-          className="ghost danger"
-          disabled={bloqueado}
-          onClick={() => ejecutar(() => onRechazar(p.msgId, comentario))}
-        >
+        <button type="button" className="ghost danger" disabled={bloqueado} onClick={() => void rechazar()}>
           Rechazar
         </button>
-        <button
-          type="button"
-          disabled={bloqueado}
-          onClick={() => ejecutar(() => onAprobar(p.msgId, correcciones, comentario))}
-        >
-          {enviando ? "Aplicando…" : TEXTO_APROBAR[p.recomendacion]}
-          {Object.keys(correcciones).length ? ` (${Object.keys(correcciones).length} corrección/es)` : ""}
+        <button type="button" disabled={bloqueado} onClick={() => void aprobar()}>
+          {enviando ? "Aplicando…" : "Confirmar datos y registrar"}
+          {corregidos ? ` (${corregidos} corrección/es)` : ""}
         </button>
       </footer>
     </article>
   );
 }
 
-/** Tarjeta post-HITL: qué decidió el humano y qué se ejecutó. */
-export function ResolucionCard({ propuesta: p }: { propuesta: Propuesta }) {
-  const r = p.resolucion;
-  if (!r) return null;
-  const correcciones = Object.entries(r.correcciones ?? {});
-  const cambios = Object.entries(r.cambios ?? {});
+/** Tarjeta posterior a la decisión: quién decidió, por qué canal, qué corrigió y qué se escribió. */
+export function ResolucionCard({ decision }: { decision: DecisionVisible }) {
+  const rechazada = decision.decision === "rechazado";
+  const correcciones = Object.entries(decision.correcciones);
+  // En una inserción todas las columnas "cambian": solo vale la pena detallar una actualización.
+  const cambios = decision.accion === "actualizado" ? Object.entries(decision.cambios) : [];
   return (
-    <article className={`card resolved ${p.estado === "RECHAZADA" ? "is-rejected" : "is-approved"}`}>
+    <article className={`card resolved ${rechazada ? "is-rejected" : "is-approved"}`}>
       <header className="card-head">
         <div>
-          <strong>{p.msgId}</strong>
-          <span className="muted"> · {p.clasificacion.tipo}</span>
+          <strong>{decision.mensaje_id}</strong>
+          <span className="muted"> · vía {decision.via}</span>
         </div>
-        <span className={`pill ${p.estado === "RECHAZADA" ? "pill-RECHAZAR" : "pill-ok"}`}>
-          {p.estado === "RECHAZADA" ? "Rechazada" : "Aprobada"}
-        </span>
+        <span className={`pill ${rechazada ? "pill-rechazo" : "pill-ok"}`}>{rechazada ? "Rechazado" : "Aprobado"}</span>
       </header>
       <p className="card-sub">
-        Agente recomendó <b>{ETIQUETA[p.recomendacion]}</b> → {r.aprobador} decidió{" "}
-        <b>{r.accion}</b> → se ejecutó <b>{r.decisionFinal}</b>
-        {r.contratoId ? ` [${r.contratoId}]` : ""}
+        <b>{decision.aprobador}</b> {rechazada ? "rechazó" : "confirmó"}
+        {decision.accion ? (
+          <>
+            {" "}
+            → se ejecutó <b>{decision.accion}</b>
+            {decision.id_contrato ? ` [${decision.id_contrato}]` : ""}
+          </>
+        ) : null}
       </p>
       {correcciones.length ? (
-        <p className="muted small">
-          Correcciones: {correcciones.map(([k, v]) => `${k}=${v}`).join(", ")}
-        </p>
+        <p className="muted small">Correcciones: {correcciones.map(([campo, valor]) => `${campo} = ${mostrarValor(valor)}`).join(", ")}</p>
       ) : null}
       {cambios.length ? (
-        <p className="muted small">
-          Cambios en maestro:{" "}
-          {cambios.map(([k, c]) => `${k}: ${String(c.antes)} → ${String(c.despues)}`).join(" · ")}
-        </p>
+        <p className="muted small">Cambios en maestro: {cambios.map(([columna, cambio]) => `${columna}: ${mostrarValor(cambio.antes)} → ${mostrarValor(cambio.despues)}`).join(" · ")}</p>
       ) : null}
-      {r.comentario ? <p className="small">“{r.comentario}”</p> : null}
-      <p className="muted small">{new Date(r.resueltaEn).toLocaleString("es-CO")}</p>
+      {decision.motivo ? <p className="small">“{decision.motivo}”</p> : null}
+      <p className="muted small">{fechaHora(decision.ts)}</p>
     </article>
   );
 }

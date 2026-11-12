@@ -11,5 +11,5 @@
     "isolatedModules": true,
     "noUncheckedIndexedAccess": true
   },
-  "include": ["src/main.tsx", "src/chat", "src/vite-env.d.ts"]
+  "include": ["src"]
 }
