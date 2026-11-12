@@ -23,9 +23,11 @@ Los grafos usan la **misma raíz del proyecto** que la app: lo que se registre e
 ## `recepcionista`
 
 ```
-__start__ ─▶ recepcionista ⇄ herramientas
+__start__ ─▶ recepcionista ⇄ herramientas ─(recepcion_procesar_buzon)─▶ [motor]
                    └──────────▶ __end__
 ```
+
+Cuando el modelo llama a `recepcion_procesar_buzon`, la pasada del motor corre como **subgrafo de `herramientas`**: es la misma pasada del grafo `motor` (`ingestar → extraer → validar → decidir → registrar | esperar_revision | cerrar → alertas`), sin `revision_humana`, porque en el chat la pausa la cierra el turno (CA3) y la decisión llega por `recepcion_responder_revision`. En la pestaña **Graph** se ven sus nodos dentro de `herramientas` (`herramientas:extraer`, …) y en el hilo cada paso del motor aparece anidado. La herramienta no cambia: valida sus argumentos, escribe `out/log.jsonl` y devuelve los mismos `pasos`. Solo cambia quién recorre la pasada, mediante `ContextoMotor.ejecutarPasada` (`api/src/application/workflows/process-mailbox.ts`), que la app y la demo no definen.
 
 Pestaña **Chat**. Prueba: «Procesa el buzón de contratos con fecha de hoy 2026-09-03» → una llamada a `recepcion_procesar_buzon` y la pregunta por msg-006; en el mismo hilo, «confirmo el valor 0 y la fecha fin 2027-08-31» → `recepcion_responder_revision` registra CM-2026-03. Cada `ToolMessage` lleva en `artifact` la llamada visible con los `pasos` del motor.
 
@@ -66,4 +68,4 @@ Estado: `hoy`, `mensaje_ids`, `cola`, `actual` (el mensaje en curso y su `recorr
 
 ## Pruebas
 
-`studio/tests/graphs.test.ts` (4 pruebas, en `bun run test`): el motor pausa en msg-006 y reanuda con la decisión, una respuesta inválida vuelve a pausar, la recepcionista repite el flujo del PRD §11 con el proveedor offline y la guarda CA3 rige también aquí.
+`studio/tests/graphs.test.ts` (5 pruebas, en `bun run test`): el motor pausa en msg-006 y reanuda con la decisión, una respuesta inválida vuelve a pausar, la recepcionista repite el flujo del PRD §11 con el proveedor offline, `recepcion_procesar_buzon` recorre el motor como subgrafo visible con el mismo resultado, y la guarda CA3 rige también aquí.

@@ -1,19 +1,22 @@
 import { AIMessage, type BaseMessage, ToolMessage, isAIMessage, isHumanMessage, isToolMessage } from "@langchain/core/messages";
-import { type BaseCheckpointSaver, END, MessagesZodState, START, StateGraph } from "@langchain/langgraph";
+import { type BaseCheckpointSaver, END, type LangGraphRunnableConfig, MessagesZodState, START, StateGraph } from "@langchain/langgraph";
 import { z } from "zod/v3";
 import { ejecutarLlamada } from "../../api/src/agent/execution.ts";
 import { definicionesParaModelo } from "../../api/src/agent/model-tools.ts";
 import { leerPromptSistema } from "../../api/src/agent/prompt.ts";
 import { cerrarPendientes, conPreguntaExplicita, errorDeProveedor, mensajeDeTope, pendientesVigentes } from "../../api/src/agent/turn.ts";
+import type { ContextoMotor } from "../../api/src/application/workflows/process-mailbox.ts";
 import type { LlamadaVisible } from "../../api/src/http/types.ts";
+import { compilarPasada, pasadaComoSubgrafo } from "./engine-graph.ts";
 import { CLAVE_FIRMAS, aMensajesLlm, firmasDeLlamadas } from "./messages.ts";
 import { type DependenciasStudio, dependenciasPorEntorno } from "./project.ts";
 
 /**
  * La recepcionista como grafo de LangGraph, para verla en Studio: el mismo ReAct que `api/src/agent/loop.ts`,
  * con el mismo prompt, el mismo `ProveedorLlm`, las mismas cinco herramientas `recepcion_*` y la misma guarda CA3.
+ * Cuando el modelo llama a `recepcion_procesar_buzon`, la pasada del motor corre como subgrafo `motor` de `herramientas`.
  *
- *   __start__ ─▶ recepcionista ⇄ herramientas
+ *   __start__ ─▶ recepcionista ⇄ herramientas ─(recepcion_procesar_buzon)─▶ [motor]
  *                     └──────────▶ __end__
  */
 
@@ -87,11 +90,12 @@ export function crearGrafoRecepcion(deps: DependenciasStudio) {
     return { ...turno, iteraciones: turno.iteraciones + 1, messages: [pide] };
   }
 
-  async function herramientas(crudo: z.input<typeof EstadoRecepcion>, config: { configurable?: { thread_id?: string } }): Promise<Actualizacion> {
+  async function herramientas(crudo: z.input<typeof EstadoRecepcion>, config: LangGraphRunnableConfig): Promise<Actualizacion> {
     const estado = leerEstado(crudo);
     const pide = ultimoMensaje(estado.messages);
     if (!pide || !isAIMessage(pide)) return {};
-    const ctx = ctxDe(config.configurable?.thread_id ?? "local");
+    const hilo = typeof config.configurable?.thread_id === "string" ? config.configurable.thread_id : "local";
+    const ctx: ContextoMotor = { ...ctxDe(hilo), ejecutarPasada: pasadaComoSubgrafo(config) };
     const permitidos = new Set(estado.pendientes_al_inicio);
     const resultados: ToolMessage[] = [];
     const enRevision = [...estado.en_revision];
@@ -113,7 +117,8 @@ export function crearGrafoRecepcion(deps: DependenciasStudio) {
 
   return new StateGraph({ state: EstadoRecepcion, input: EntradaRecepcion })
     .addNode("recepcionista", recepcionista)
-    .addNode("herramientas", herramientas)
+    // Declarado para que Studio dibuje el motor dentro de `herramientas`; cada llamada compila el suyo con su contexto.
+    .addNode("herramientas", herramientas, { subgraphs: [compilarPasada(ctxDe("motor"))] })
     .addEdge(START, "recepcionista")
     .addConditionalEdges("recepcionista", tieneLlamadas, ["herramientas", END])
     .addEdge("herramientas", "recepcionista");

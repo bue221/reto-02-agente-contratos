@@ -64,6 +64,35 @@ describe("grafo de la recepcionista en LangGraph", () => {
     expect(await leerSalida(ctx, "sharepoint", "maestro-contratos.csv")).toContain("CM-2026-03");
   });
 
+  test("recepcion_procesar_buzon recorre el motor como subgrafo visible de herramientas, con el mismo resultado", async () => {
+    const ctx = await crearProyecto();
+    const deps = { directorio: ctx.directory, proveedor: new ProveedorOffline(), maxIteraciones: 25, cargarSistema: async () => "sistema" };
+    const grafo = compilarRecepcion(deps, new MemorySaver());
+
+    const dibujo = await grafo.getGraphAsync({ xray: true });
+    expect(Object.keys(dibujo.nodes)).toEqual(expect.arrayContaining(["herramientas:extraer", "herramientas:decidir", "herramientas:esperar_revision", "herramientas:alertas"]));
+
+    const nodosDelMotor = new Set<string>();
+    let final: Record<string, unknown> = {};
+    const eventos = await grafo.stream(
+      { messages: [new HumanMessage("Procesa el buzón de contratos con fecha de hoy 2026-09-03")] },
+      { ...hilo("r3"), streamMode: "updates", subgraphs: true },
+    );
+    for await (const [espacio, actualizacion] of eventos) {
+      if (espacio.some((parte) => parte.startsWith("herramientas"))) for (const nodo of Object.keys(actualizacion)) nodosDelMotor.add(nodo);
+      final = actualizacion;
+    }
+    expect([...nodosDelMotor]).toEqual(expect.arrayContaining(["ingestar", "extraer", "validar", "decidir", "registrar", "esperar_revision", "cerrar", "alertas"]));
+    expect(final).toHaveProperty("recepcionista");
+
+    const estado = await grafo.getState(hilo("r3"));
+    expect(estado.values.pendientes).toEqual(["msg-006"]);
+    const resultado = estado.values.messages.find(isToolMessage);
+    const visible = resultado?.artifact as { pasos?: { nombre: string }[] } | undefined;
+    expect(visible?.pasos?.filter((paso) => paso.nombre === "contratos_extraer")).toHaveLength(6);
+    expect(lineasJson(await leerSalida(ctx, "log.jsonl")).some((entrada) => entrada.herramienta === "recepcion_procesar_buzon" && entrada.ok)).toBe(true);
+  });
+
   test("la guarda CA3 también rige en Studio: no se decide sobre un mensaje por el que no se preguntó", async () => {
     const ctx = await crearProyecto();
     const autoaprueba = {

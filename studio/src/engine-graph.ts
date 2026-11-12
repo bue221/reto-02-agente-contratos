@@ -1,4 +1,4 @@
-import { Annotation, type BaseCheckpointSaver, END, START, StateGraph, interrupt } from "@langchain/langgraph";
+import { Annotation, type BaseCheckpointSaver, END, type LangGraphRunnableConfig, START, StateGraph, interrupt } from "@langchain/langgraph";
 import { z } from "zod";
 import type { Alertas } from "../../api/src/application/use-cases/alerts.ts";
 import { reanudarRevision } from "../../api/src/application/workflows/approval-tray.ts";
@@ -12,16 +12,18 @@ import {
   estadoInicial,
   mensajeConError,
 } from "../../api/src/application/workflows/contract-graph.ts";
-import { type Omitido, ingestar } from "../../api/src/application/workflows/process-mailbox.ts";
+import { type EjecutorPasada, type Omitido, ingestar } from "../../api/src/application/workflows/process-mailbox.ts";
 import { llamarHerramienta } from "../../api/src/application/workflows/tool-call.ts";
 import { CorreccionesSchema } from "../../api/src/core/domain/contract.ts";
+import { exito, fallo } from "../../api/src/core/domain/result.ts";
 import type { ContextoHerramienta } from "../../api/src/tools/tool.ts";
 import { type DependenciasStudio, dependenciasPorEntorno } from "./project.ts";
 
 /**
  * El motor determinista como grafo de LangGraph, para verlo en Studio. Los nodos de cada mensaje son los
  * mismos `NODOS` de `contract-graph.ts`, con la misma topología (`ARISTAS`); la pasada y la reanudación usan
- * las mismas funciones que la app. Solo cambia quién recorre el grafo:
+ * las mismas funciones que la app. Solo cambia quién recorre el grafo. La recepcionista invoca la misma
+ * pasada, sin `revision_humana`, como subgrafo de su nodo `herramientas` (`pasadaComoSubgrafo`):
  *
  *   ingestar ─▶ siguiente_mensaje ─┬─▶ extraer ─▶ validar ─▶ decidir ─┬─▶ registrar ──────┐
  *                    ▲             │                                 ├─▶ esperar_revision ┤
@@ -76,9 +78,10 @@ const sinDecidir = (estado: Estado): string[] => {
 /** Un fallo de forma o de registro deja el mensaje pausado; si ya se cerró en otro canal, se da por resuelto. */
 const CODIGOS_YA_RESUELTOS = new Set(["ya_procesado", "no_pendiente"]);
 
-export function crearGrafoMotor(deps: Pick<DependenciasStudio, "directorio">) {
-  const ctx: ContextoHerramienta = { directory: deps.directorio, sessionId: "studio" };
+const contextoStudio = (directorio: string): ContextoHerramienta => ({ directory: directorio, sessionId: "studio" });
 
+/** Ingesta, grafo de cada mensaje y alertas: lo que recorre una pasada, sin la pausa humana. */
+function crearPasada(ctx: ContextoHerramienta) {
   async function nodoIngestar(estado: Estado): Promise<Actualizacion> {
     const ingesta = await ingestar(ctx, estado.mensaje_ids ?? undefined);
     if (!ingesta.ok) return { error: ingesta.error, cola: [] };
@@ -107,6 +110,30 @@ export function crearGrafoMotor(deps: Pick<DependenciasStudio, "directorio">) {
     return { reporte: alertas.ok ? alertas.data : { error: alertas.error } };
   }
 
+  const grafo = new StateGraph(EstadoMotor)
+    .addNode("ingestar", nodoIngestar)
+    .addNode("siguiente_mensaje", siguienteMensaje)
+    .addNode("extraer", nodoDeMensaje("extraer"))
+    .addNode("validar", nodoDeMensaje("validar"))
+    .addNode("decidir", nodoDeMensaje("decidir"))
+    .addNode("registrar", nodoDeMensaje("registrar"))
+    .addNode("esperar_revision", nodoDeMensaje("esperar_revision"))
+    .addNode("cerrar", nodoDeMensaje("cerrar"))
+    .addNode("alertas", nodoAlertas)
+    .addEdge(START, "ingestar")
+    .addEdge("ingestar", "siguiente_mensaje")
+    .addConditionalEdges("siguiente_mensaje", (estado: Estado) => estado.siguiente ?? "alertas", [NODO_INICIAL, "alertas"]);
+
+  for (const [nodo, destinos] of Object.entries(ARISTAS) as [NodoMensaje, readonly (NodoMensaje | null)[]][]) {
+    const posibles = destinos.map((destino) => destino ?? "siguiente_mensaje");
+    grafo.addConditionalEdges(nodo, (estado: Estado) => estado.siguiente ?? "siguiente_mensaje", posibles);
+  }
+  return grafo;
+}
+
+export function crearGrafoMotor(deps: Pick<DependenciasStudio, "directorio">) {
+  const ctx = contextoStudio(deps.directorio);
+
   /** La pausa humana: el grafo se detiene aquí hasta que alguien responda desde Studio. */
   async function revisionHumana(estado: Estado): Promise<Actualizacion> {
     const [id] = sinDecidir(estado);
@@ -130,28 +157,10 @@ export function crearGrafoMotor(deps: Pick<DependenciasStudio, "directorio">) {
     return { decisiones: [...estado.decisiones, anotada] };
   }
 
-  const grafo = new StateGraph(EstadoMotor)
-    .addNode("ingestar", nodoIngestar)
-    .addNode("siguiente_mensaje", siguienteMensaje)
-    .addNode("extraer", nodoDeMensaje("extraer"))
-    .addNode("validar", nodoDeMensaje("validar"))
-    .addNode("decidir", nodoDeMensaje("decidir"))
-    .addNode("registrar", nodoDeMensaje("registrar"))
-    .addNode("esperar_revision", nodoDeMensaje("esperar_revision"))
-    .addNode("cerrar", nodoDeMensaje("cerrar"))
-    .addNode("alertas", nodoAlertas)
+  return crearPasada(ctx)
     .addNode("revision_humana", revisionHumana)
-    .addEdge(START, "ingestar")
-    .addEdge("ingestar", "siguiente_mensaje")
-    .addConditionalEdges("siguiente_mensaje", (estado: Estado) => estado.siguiente ?? "alertas", [NODO_INICIAL, "alertas"])
     .addConditionalEdges("alertas", (estado: Estado) => (sinDecidir(estado).length > 0 ? "revision_humana" : END), ["revision_humana", END])
     .addEdge("revision_humana", "alertas");
-
-  for (const [nodo, destinos] of Object.entries(ARISTAS) as [NodoMensaje, readonly (NodoMensaje | null)[]][]) {
-    const posibles = destinos.map((destino) => destino ?? "siguiente_mensaje");
-    grafo.addConditionalEdges(nodo, (estado: Estado) => estado.siguiente ?? "siguiente_mensaje", posibles);
-  }
-  return grafo;
 }
 
 /** Cada mensaje cuesta hasta 7 pasos (siguiente_mensaje + 6 nodos): el tope por defecto de LangGraph (25) no alcanza para un buzón. */
@@ -161,5 +170,25 @@ export const compilarMotor = (deps: Pick<DependenciasStudio, "directorio">, chec
   crearGrafoMotor(deps)
     .compile(checkpointer ? { checkpointer } : {})
     .withConfig({ recursionLimit: LIMITE_PASOS });
+
+/**
+ * Subgrafo de `recepcion_procesar_buzon` en la recepcionista. Sin `revision_humana`: ahí la pausa la cierra
+ * el turno del chat (CA3) y la decisión llega por `recepcion_responder_revision`. Se compila sin checkpointer
+ * para heredar el del grafo padre y quedar guardado como subgrafo del hilo.
+ */
+export const compilarPasada = (ctx: ContextoHerramienta) =>
+  crearPasada(ctx).addEdge("alertas", END).compile({ name: "motor" }).withConfig({ recursionLimit: LIMITE_PASOS });
+
+/** Mismo resultado que el bucle de `ejecutarPasada`, recorrido por LangGraph dentro del nodo que lo invoca. */
+export const pasadaComoSubgrafo =
+  (config: LangGraphRunnableConfig): EjecutorPasada =>
+  async (ctx, solicitud) => {
+    const entrada = { hoy: solicitud.hoy, mensaje_ids: solicitud.mensajeIds ? [...solicitud.mensajeIds] : null };
+    const final = await compilarPasada(ctx).invoke(entrada, { ...config, recursionLimit: LIMITE_PASOS });
+    if (final.error) return fallo(final.error);
+    const { reporte } = final;
+    const alertas = reporte === null ? fallo<Alertas>("la pasada terminó sin reporte de alertas") : "error" in reporte ? fallo<Alertas>(reporte.error) : exito(reporte);
+    return exito({ mensajes: final.mensajes, omitidos: final.omitidos, en_revision: final.en_revision, alertas });
+  };
 
 export const graph = compilarMotor(dependenciasPorEntorno());

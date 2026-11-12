@@ -38,6 +38,16 @@ export interface SolicitudPasada {
   mensajeIds?: readonly string[];
 }
 
+export type EjecutorPasada = (ctx: ContextoHerramienta, solicitud: SolicitudPasada) => Promise<Resultado<Pasada>>;
+
+export interface ContextoMotor extends ContextoHerramienta {
+  /**
+   * Recorrido alternativo con el mismo resultado que el bucle propio. LangGraph Studio lo usa para ejecutar
+   * la pasada como subgrafo y que se vea nodo por nodo; la app y la demo no lo definen.
+   */
+  ejecutarPasada?: EjecutorPasada;
+}
+
 export interface Ingesta {
   ids: string[];
   omitidos: Omitido[];
@@ -76,7 +86,8 @@ export async function procesarBuzon(ctx: ContextoHerramienta): Promise<Resultado
   return recorrido.ok ? exito(recorrido.data.mensajes) : recorrido;
 }
 
-export async function ejecutarPasada(ctx: ContextoHerramienta, solicitud: SolicitudPasada): Promise<Resultado<Pasada>> {
+export async function ejecutarPasada(ctx: ContextoMotor, solicitud: SolicitudPasada): Promise<Resultado<Pasada>> {
+  if (ctx.ejecutarPasada) return ctx.ejecutarPasada(ctx, solicitud);
   const recorrido = await recorrerBuzon(ctx, solicitud.mensajeIds);
   if (!recorrido.ok) return recorrido;
   const alertas = await llamarHerramienta<Alertas>("contratos_alertas", { hoy: solicitud.hoy }, ctx);
