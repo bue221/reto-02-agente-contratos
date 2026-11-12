@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { type FilaMaestro, obtenerMaestro } from "./api";
+import { type FilaMaestroVisible as FilaMaestro, api } from "../api";
 
 const formatoValor = (fila: FilaMaestro): string => (fila.valor === 0 ? "por demanda" : `${fila.moneda} ${fila.valor.toLocaleString("es-CO")}`);
 
@@ -9,7 +9,8 @@ export function PanelMaestro({ version }: { version: number }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    obtenerMaestro()
+    api
+      .maestro()
       .then((respuesta) => {
         setFilas(respuesta.filas);
         setError(null);

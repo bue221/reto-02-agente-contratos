@@ -1,4 +1,4 @@
-import type { LlamadaVisible } from "./api";
+import type { LlamadaVisible } from "../api";
 
 /** Cada llamada a herramienta visible en el chat (CA4): nombre, estado, resumen y argumentos desplegables. */
 export function LlamadaHerramienta({ llamada }: { llamada: LlamadaVisible }) {

@@ -1,5 +1,5 @@
 import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
-import { type Salud, type TurnoSesion, enviarMensaje, obtenerSalud, obtenerSesion } from "./api";
+import { type Salud, type TurnoSesion, enviarMensaje, obtenerSalud, obtenerSesion } from "../api";
 import { ListaDeLlamadas } from "./LlamadaHerramienta";
 import { PanelMaestro } from "./PanelMaestro";
 import { TextoMarkdown } from "./TextoMarkdown";
@@ -67,7 +67,10 @@ export function ChatApp() {
   }, []);
 
   useEffect(() => {
-    obtenerSesion(sessionId).then((sesion) => setTurnos(sesion?.turnos ?? []));
+    obtenerSesion(sessionId).then(
+      (sesion) => setTurnos(sesion?.turnos ?? []),
+      (falla: unknown) => setError(falla instanceof Error ? falla.message : String(falla)),
+    );
   }, [sessionId]);
 
   useEffect(() => {
