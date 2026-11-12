@@ -1,0 +1,26 @@
+# Blueprint de Render: un servicio web Docker que sirve API + front (ver README, sección "Despliegue").
+services:
+  - type: web
+    name: agente-contratos-reto02
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /api/health
+    autoDeploy: false
+    envVars:
+      - key: LLM_PROVIDER
+        value: auto
+      # Secreto: se carga a mano en el panel de Render, nunca en el repositorio.
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: LLM_TIMEOUT_MS
+        value: "60000"
+      - key: MAX_ITERACIONES
+        value: "25"
+      - key: MAX_TOKENS_SESION
+        value: "300000"
+      - key: MAX_TOKENS_PROCESO
+        value: "3000000"
