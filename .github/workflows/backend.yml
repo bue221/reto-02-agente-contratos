@@ -107,3 +107,87 @@ jobs:
       - name: Logs del contenedor
         if: always()
         run: docker logs api || true
+
+  desplegar:
+    name: Desplegar en AWS Lightsail
+    needs: imagen
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SERVICIO: reto02-contratos
+      AWS_REGION: us-east-1
+      IMAGEN: reto02-contratos:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Construir imagen
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: ${{ env.IMAGEN }}
+          cache-from: type=gha
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Instalar lightsailctl
+        run: |
+          sudo curl -fsSL https://s3.us-west-2.amazonaws.com/lightsailctl/latest/linux-amd64/lightsailctl -o /usr/local/bin/lightsailctl
+          sudo chmod +x /usr/local/bin/lightsailctl
+
+      - name: Subir imagen a Lightsail
+        id: subir
+        run: |
+          salida=$(aws lightsail push-container-image --service-name "$SERVICIO" --label app --image "$IMAGEN")
+          echo "$salida"
+          referencia=$(echo "$salida" | grep -o ":$SERVICIO\.app\.[0-9]*" | tail -1)
+          [ -n "$referencia" ] || { echo "::error::No se pudo leer la referencia de la imagen subida"; exit 1; }
+          echo "referencia=$referencia" >> "$GITHUB_OUTPUT"
+
+      # Reutiliza variables, puertos y health check del despliegue vigente: la clave de Gemini
+      # solo vive en Lightsail. No se imprime nada de este paso porque incluye esas variables.
+      - name: Crear despliegue con la imagen nueva
+        env:
+          REFERENCIA: ${{ steps.subir.outputs.referencia }}
+        run: |
+          aws lightsail get-container-services --service-name "$SERVICIO" --output json > servicio.json
+          jq --arg imagen "$REFERENCIA" '.containerServices[0].currentDeployment
+            | { containers: (.containers | map_values(.image = $imagen)), publicEndpoint }' servicio.json > despliegue.json
+          aws lightsail create-container-service-deployment --service-name "$SERVICIO" \
+            --cli-input-json "$(jq --arg s "$SERVICIO" '. + {serviceName: $s}' despliegue.json)" > /dev/null
+          rm -f servicio.json despliegue.json
+
+      - name: Esperar a que el despliegue quede activo
+        env:
+          REFERENCIA: ${{ steps.subir.outputs.referencia }}
+        run: |
+          for intento in $(seq 1 60); do
+            servicio=$(aws lightsail get-container-services --service-name "$SERVICIO" --output json)
+            actual=$(echo "$servicio" | jq -r '.containerServices[0].currentDeployment | "\(.state) \([.containers[].image] | first)"')
+            siguiente=$(echo "$servicio" | jq -r '.containerServices[0].nextDeployment.state // "ninguno"')
+            echo "intento $intento: vigente=$actual siguiente=$siguiente"
+            [ "$actual" = "ACTIVE $REFERENCIA" ] && exit 0
+            [ "$siguiente" = "FAILED" ] && { echo "::error::El despliegue falló en Lightsail"; exit 1; }
+            sleep 15
+          done
+          echo "::error::El despliegue no quedó activo en 15 min"
+          exit 1
+
+      - name: Verificar rutas públicas
+        run: |
+          url=$(aws lightsail get-container-services --service-name "$SERVICIO" --query 'containerServices[0].url' --output text)
+          for ruta in /api/health /api/buzon /api/bandeja; do
+            curl -fsS -o /dev/null -w "$ruta %{http_code}\n" "${url%/}$ruta"
+          done
