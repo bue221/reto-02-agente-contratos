@@ -90,7 +90,10 @@ Todas opcionales; ver [`.env.example`](.env.example). La clave solo vive en el b
 
 ## Ver los grafos en LangGraph Studio
 
-**Desde la web**: el botón **Abrir en LangGraph Studio** de la barra lateral abre Studio (smith.langchain.com, pide iniciar sesión en LangSmith; la cuenta gratuita basta) conectado al backend desplegado. La imagen levanta el servidor de LangGraph junto a la API y esta lo publica en `/langgraph`, así que Studio trabaja sobre el mismo `out/` que la app: lo que registren ahí aparece en el Buzón, la Bandeja y el Maestro.
+**Desde la web**: el botón **Abrir en LangGraph Studio** de la barra lateral abre una guía con el enlace a Studio (smith.langchain.com, pide iniciar sesión en LangSmith; la cuenta gratuita basta) y los dos valores para conectarlo al backend desplegado, con botón de copiar.
+
+Studio solo confía en `localhost`: la primera vez muestra *«Failed to connect to Agent Server because the domain … is not allowed»*. Se resuelve una vez por navegador: en esa misma pantalla, **Advanced Settings** → agrega el dominio `reto02-contratos.wn60e6ytewk9j.us-east-1.cs.amazonlightsail.com` a la lista de permitidos y reconecta con el Base URL `https://reto02-contratos.wn60e6ytewk9j.us-east-1.cs.amazonlightsail.com/langgraph`. Si sigue fallando, en la portada de Studio usa **Connect to local server**, pega el Base URL y permite el dominio en Advanced Settings del mismo diálogo. Es una restricción del lado de LangSmith: no se puede levantar desde el servidor.
+ La imagen levanta el servidor de LangGraph junto a la API y esta lo publica en `/langgraph`, así que Studio trabaja sobre el mismo `out/` que la app: lo que registren ahí aparece en el Buzón, la Bandeja y el Maestro.
 
 **En local**:
 

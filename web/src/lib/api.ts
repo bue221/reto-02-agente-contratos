@@ -26,7 +26,10 @@ const BASE_API = (import.meta.env.VITE_API_URL ?? "").replace(/\/+$/, "");
 export const URL_MAESTRO_CSV = `${BASE_API}/api/maestro.csv`;
 
 /** Studio vive en smith.langchain.com y llama desde el navegador al servidor de LangGraph que el backend publica en `/langgraph`. */
-export const URL_STUDIO = `https://smith.langchain.com/studio/?baseUrl=${encodeURIComponent(`${BASE_API || window.location.origin}/langgraph`)}`;
+export const BASE_URL_STUDIO = `${BASE_API || window.location.origin}/langgraph`;
+/** Studio solo confía en localhost: cada persona debe permitir este dominio una vez en sus Advanced Settings. */
+export const DOMINIO_STUDIO = new URL(BASE_URL_STUDIO).host;
+export const URL_STUDIO = `https://smith.langchain.com/studio/?baseUrl=${encodeURIComponent(BASE_URL_STUDIO)}`;
 
 /** Error legible para la UI con el código tipado del backend (p. ej. `no_pendiente`). */
 export class ErrorDeApi extends Error {

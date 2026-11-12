@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type CorreccionesVisibles, type FilaMaestroVisible, type RespuestaBandeja, type RespuestaBuzon, type Salud, URL_STUDIO, api, obtenerSalud } from "./lib/api";
+import { type CorreccionesVisibles, type FilaMaestroVisible, type RespuestaBandeja, type RespuestaBuzon, type Salud, api, obtenerSalud } from "./lib/api";
+import { StudioDialog } from "./components/StudioDialog";
 import { ChatView } from "./views/ChatView";
 import { mensajeDeFalla } from "./lib/format";
 import { ApprovalTrayView } from "./views/ApprovalTrayView";
@@ -53,11 +54,12 @@ type PropsBarra = {
   onAprobador: (nombre: string) => void;
   reiniciando: boolean;
   onReiniciar: () => void;
+  onStudio: () => void;
 };
 
 const ETIQUETAS_TAB: Record<Tab, string> = { buzon: "Buzón", bandeja: "Bandeja de aprobación", maestro: "Maestro CSV", chat: "Chat" };
 
-function BarraLateral({ tab, onTab, contadores, salud, aprobador, onAprobador, reiniciando, onReiniciar }: PropsBarra) {
+function BarraLateral({ tab, onTab, contadores, salud, aprobador, onAprobador, reiniciando, onReiniciar, onStudio }: PropsBarra) {
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -82,15 +84,9 @@ function BarraLateral({ tab, onTab, contadores, salud, aprobador, onAprobador, r
           {salud ? `LLM · ${salud.provider} (${salud.model})` : "backend sin conexión"}
         </span>
         {salud?.studio ? (
-          <a
-            className="button ghost"
-            href={URL_STUDIO}
-            target="_blank"
-            rel="noreferrer"
-            title="Los grafos recepcionista y motor en LangGraph Studio, sobre el mismo buzón. Pide iniciar sesión en LangSmith (la cuenta gratuita basta)."
-          >
+          <button type="button" className="ghost" onClick={onStudio}>
             Abrir en LangGraph Studio
-          </a>
+          </button>
         ) : null}
         <label className="approver-field">
           <span>Aprobador</span>
@@ -117,6 +113,7 @@ export function App() {
   const [progreso, setProgreso] = useState<{ hechos: number; total: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [reiniciando, setReiniciando] = useState(false);
+  const [studioAbierto, setStudioAbierto] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
   const [version, setVersion] = useState(0);
@@ -220,7 +217,11 @@ export function App() {
 
   return (
     <div className="shell">
-      <BarraLateral tab={tab} onTab={setTab} contadores={contadores} salud={salud} aprobador={aprobador} onAprobador={setAprobador} reiniciando={reiniciando} onReiniciar={() => void reiniciar()} />
+      <BarraLateral tab={tab} onTab={setTab} contadores={contadores} salud={salud} aprobador={aprobador} onAprobador={setAprobador} reiniciando={reiniciando}
+        onReiniciar={() => void reiniciar()}
+        onStudio={() => setStudioAbierto(true)}
+      />
+      <StudioDialog abierto={studioAbierto} onCerrar={() => setStudioAbierto(false)} />
       <main className="main">
         <header className="page-head">
           <h1>{SECCIONES[tab].titulo}</h1>

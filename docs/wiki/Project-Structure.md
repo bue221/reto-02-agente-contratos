@@ -143,6 +143,7 @@ web/
     │   ├── ProposalCard.tsx    ProposalCard (aprobar/rechazar con correcciones) y ResolutionCard
     │   ├── ToolCallList.tsx    ToolCall y ToolCallList
     │   ├── TurnProgress.tsx    el turno mientras corre: herramienta en curso y pasos del motor
+    │   ├── StudioDialog.tsx    guía para abrir LangGraph Studio contra este backend (dominio y Base URL para copiar)
     │   └── MarkdownText.tsx    render de Markdown propio (tablas, listas, títulos, código)
     ├── lib/
     │   ├── api.ts              cliente único de la API (incluye el chat por SSE) + tipos reexportados de api/src/http/types.ts

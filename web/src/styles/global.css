@@ -406,15 +406,13 @@ button:disabled {
   cursor: not-allowed;
 }
 
-button.ghost,
-a.button.ghost {
+button.ghost {
   background: transparent;
   color: var(--text-2);
   border-color: var(--border-strong);
 }
 
-button.ghost:hover:not(:disabled),
-a.button.ghost:hover {
+button.ghost:hover:not(:disabled) {
   background: var(--surface-2);
   color: var(--text);
 }
@@ -1354,4 +1352,63 @@ td.changed {
 
 .master tbody tr:hover td {
   background: var(--surface-2);
+}
+
+/* ---------- Diálogo de LangGraph Studio ---------- */
+
+.studio-dialog {
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  color: var(--text);
+  overflow: auto;
+}
+
+.studio-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.studio-cuerpo {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px 20px;
+  line-height: 1.55;
+}
+
+.studio-cuerpo p {
+  margin: 0;
+}
+
+.studio-pasos {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.studio-pasos .button {
+  margin-top: 8px;
+}
+
+.copiable {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.copiable-fila {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.copiable-fila code {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  overflow-wrap: anywhere;
+  user-select: all;
 }
