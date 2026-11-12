@@ -86,7 +86,7 @@ bun run test                     # 148 pruebas: api/tests (extracción, reglas, 
 bun run typecheck                # api + web
 ```
 
-`demo.ts` limpia `out/`, hace la primera pasada (msg-006 queda sin registrar por revisión), una segunda llamada con `confirmado: true` y genera `out/alertas.md`.
+`demo.ts` limpia `out/`, hace la primera pasada (msg-006 queda sin registrar por revisión), una segunda llamada con `confirmado: true` y genera `out/alertas.md`. Como `out/` es el mismo estado que usan la app y Studio, después de la demo el buzón queda procesado: para volver a probar en el chat, usa «Reiniciar demo» o el grafo `reiniciar_demo`.
 
 ## API
 

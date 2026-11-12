@@ -70,6 +70,10 @@ async function main(): Promise<void> {
   await confirmar(resultados.data);
   await imprimirAlertas();
   console.log("\nSalidas en out/: sharepoint/maestro-contratos.csv, sharepoint/historial.jsonl, sharepoint/Contratos/, procesados.json, log.jsonl, alertas.md");
+  console.log(
+    "\nAviso: la demo reinició out/, el estado que comparten la app y Studio, y dejó el buzón procesado. " +
+      "Antes de volver a probar en el chat, usa «Reiniciar demo» en la app (POST /api/demo/reset) o el grafo reiniciar_demo de Studio.",
+  );
 }
 
 await main();

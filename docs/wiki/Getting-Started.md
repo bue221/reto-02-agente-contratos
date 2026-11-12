@@ -76,7 +76,7 @@ Resultado esperado por mensaje:
 ## Verificar sin modelo
 
 ```bash
-bun run demo        # demo.ts: limpia out/, primera pasada, confirma msg-006 y genera alertas
+bun run demo        # demo.ts: limpia out/, primera pasada, confirma msg-006 y genera alertas (pisa el estado de la app y Studio)
 bun run test        # 148 pruebas: api/tests y studio/tests
 bun run typecheck   # api + web + studio
 ```

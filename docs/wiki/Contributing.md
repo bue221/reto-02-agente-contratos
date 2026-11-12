@@ -119,12 +119,12 @@ Ver [Proveedores LLM → Agregar un proveedor](LLM-Providers.md#agregar-un-prove
 ## Checklist antes de entregar
 
 ```bash
-bun run typecheck && bun test && bun run sync:module --check && bun run demo
+bun run typecheck && bun test && bun run sync:module --check
 ```
 
 - [ ] Typecheck y pruebas en verde.
 - [ ] `modulo/` sincronizado.
-- [ ] `bun run demo` da el resultado esperado de los 6 mensajes.
+- [ ] Si cambiaste reglas, extracción o el motor: `bun run demo` da el resultado esperado de los 6 mensajes. Borra `out/` (el estado que comparten la app y Studio) y deja el buzón procesado; después usa «Reiniciar demo» o el grafo `reiniciar_demo` para volver a probar en el chat.
 - [ ] Si tocaste el front: `bun run build`.
 - [ ] Si tocaste la imagen o rutas copiadas por el `Dockerfile`: `docker build .`.
 - [ ] README, `SOLUCION.md` y la página de la wiki afectada al día.

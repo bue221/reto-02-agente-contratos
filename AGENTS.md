@@ -18,7 +18,7 @@ Requisito: Bun ≥ 1.2. Usa siempre `bun` (no npm, pnpm, yarn ni node).
 | `bun run dev` | Script `dev` de cada workspace: API con recarga en `:3000` + front Vite en `:5173` (proxy de `/api`). |
 | `bun run test` | 148 pruebas: `api/tests/` (`unit/` e `integration/`) y `studio/tests/`. No necesitan clave. `bun test` desde la raíz también sirve. |
 | `bun run typecheck` | `tsc --noEmit` de `api/`, `web/` y `studio/`. |
-| `bun run demo` | `demo.ts`: procesa el buzón llamando directo a las herramientas, sin modelo. |
+| `bun run demo` | `demo.ts`: procesa el buzón llamando directo a las herramientas, sin modelo. **Borra `out/`** (el estado que comparten la app y Studio) y lo deja todo procesado. |
 | `bun run sync:module` | Regenera `modulo/agent.md` y `modulo/skill/…/SKILL.md`. `--check` falla si están desactualizados. |
 | `bun run studio` | Servidor de LangGraph en `:2024` con los grafos `recepcionista`, `motor` y `reiniciar_demo` para LangGraph Studio ([wiki](docs/wiki/Studio.md)). Solo desarrollo. |
 | `bun run build` / `bun run start` | Compila el front y sirve API + front en un solo proceso. |
@@ -116,7 +116,9 @@ Pasos completos en [Contribuir](docs/wiki/Contributing.md).
 ## Antes de terminar
 
 ```bash
-bun run typecheck && bun test && bun run sync:module --check && bun run demo
+bun run typecheck && bun test && bun run sync:module --check
 ```
+
+Si cambiaste reglas, extracción o el motor, además `bun run demo`. Ojo: borra `out/` y deja el buzón procesado, así que pisa lo que la usuaria esté probando en la app o en Studio. No la ejecutes si hay una sesión abierta; si la ejecutaste, avísale que use «Reiniciar demo» o el grafo `reiniciar_demo`. La CI la corre igual (`verificar`).
 
 Si cambiaste el front: `bun run build`. Si cambiaste rutas, comandos o comportamiento visible: actualiza `README.md`, `SOLUCION.md` y la página de la wiki correspondiente.
