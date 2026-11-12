@@ -2,7 +2,8 @@
 
 Agente de chat que actúa como **punto único de recepción de contratos**: lee el buzón, extrae los datos de cada contrato con confianza por campo, lo clasifica contra el maestro (nuevo, actualización, duplicado, rechazado), registra lo limpio, **pide confirmación humana** para lo dudoso y genera el reporte de alertas. Backend Bun + Hono, herramientas tipadas con zod, adaptador LLM propio (Gemini 2.5 Flash) y front React.
 
-- **Link de prueba**: `<pendiente de despliegue>` (público, sin clave de acceso).
+- **Link de prueba**: <https://reto02-contratos.vercel.app> (público, sin clave de acceso).
+- **Backend (AWS Lightsail)**: <https://reto02-contratos.wn60e6ytewk9j.us-east-1.cs.amazonlightsail.com/api/health>
 - **Planteamiento de la solución**: [`SOLUCION.md`](SOLUCION.md).
 
 ## Arranque local (un comando)
@@ -48,6 +49,8 @@ Todas opcionales; ver [`.env.example`](.env.example). La clave solo vive en el b
 | `MAX_TOKENS_SESION` | `300000` | Tope de tokens por sesión. |
 | `MAX_TOKENS_PROCESO` | `3000000` | Tope de tokens del proceso (abrir sesiones nuevas no lo evade). |
 | `PORT` | `3000` | Puerto del backend. |
+| `CORS_ORIGINS` | vacío | Orígenes del front desplegado aparte, separados por coma. Vacío: solo mismo origen. |
+| `VITE_API_URL` | vacío | Solo en el build del front: URL pública del backend. Vacío: mismo origen. |
 
 ## Verificación sin modelo
 
@@ -96,13 +99,36 @@ docker build -t agente-contratos .
 docker run -p 3000:3000 -e GOOGLE_API_KEY=... agente-contratos
 ```
 
-**Render** (blueprint [`render.yaml`](render.yaml)):
+### Despliegue actual: front en Vercel, backend en AWS Lightsail
 
-1. Sube el repositorio a GitHub/GitLab.
-2. En Render: *New → Blueprint* y selecciona el repositorio; crea el servicio `agente-contratos-reto02` (Docker, plan free, health check `/api/health`).
-3. En *Environment*, carga `GOOGLE_API_KEY` (marcado como secreto, `sync: false`).
-4. *Manual Deploy* y prueba `https://<servicio>.onrender.com/api/health`. Reemplaza el link de arriba.
+| Pieza | Servicio | Configuración |
+|---|---|---|
+| Front (`web/`) | Vercel, proyecto `reto02-contratos` | [`web/vercel.json`](web/vercel.json); variable de build `VITE_API_URL` = URL del backend. |
+| Backend (imagen del `Dockerfile`) | AWS Lightsail Containers `reto02-contratos` (nano, 1 nodo, `us-east-1`) | Puerto 3000, health check `/api/health`; variables `LLM_PROVIDER=gemini`, `GOOGLE_API_KEY`, `GEMINI_MODEL`, `CORS_ORIGINS=https://reto02-contratos.vercel.app`. |
 
-Notas: el contexto de build usa [`Dockerfile.dockerignore`](Dockerfile.dockerignore) (BuildKit lo prefiere sobre `.dockerignore`, que hoy excluye `src/` y `web/` por la versión anterior en `langgraph_app/`). En el plan free de Render el disco es efímero: `out/` y las sesiones se pierden al reiniciar, lo cual es aceptable para la demo.
+La clave de Gemini solo existe como variable de entorno del contenedor en Lightsail: no está en el repositorio, en la imagen ni en el front.
+
+Backend (requiere AWS CLI y `lightsailctl`):
+
+```bash
+docker buildx build --platform linux/amd64 -t reto02-contratos:latest --load .
+aws lightsail create-container-service --service-name reto02-contratos --power nano --scale 1   # solo la primera vez
+aws lightsail push-container-image --service-name reto02-contratos --label app --image reto02-contratos:latest
+# create-container-service-deployment con la imagen ":reto02-contratos.app.<n>", las variables de arriba y el health check
+```
+
+Si usas `aws login`, `lightsailctl` no lee esas credenciales: expórtalas antes con `eval "$(aws configure export-credentials --format env)"`.
+
+Front:
+
+```bash
+cd web && vercel deploy --prod --build-env VITE_API_URL=https://<servicio>.cs.amazonlightsail.com
+```
+
+Para apagar el backend al terminar la defensa: `aws lightsail delete-container-service --service-name reto02-contratos`.
+
+**Alternativa en un solo servicio**: el blueprint [`render.yaml`](render.yaml) despliega la misma imagen (API + front) en Render; solo hay que cargar `GOOGLE_API_KEY` como secreto.
+
+Notas: el contexto de build usa [`Dockerfile.dockerignore`](Dockerfile.dockerignore) (BuildKit lo prefiere sobre `.dockerignore`, que hoy excluye `src/` y `web/` por la versión anterior en `langgraph_app/`). El disco del contenedor es efímero: `out/` y las sesiones se pierden al redesplegar o reiniciar, lo cual es aceptable para la demo.
 
 > `langgraph_app/` es la versión anterior (LangGraph) y no forma parte de esta entrega.

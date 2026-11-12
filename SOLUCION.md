@@ -105,7 +105,8 @@ Determinista sobre `contrato.txt` (`src/extraccion/`), sin modelo:
 | **Extracción determinista como única fuente de valores** | Extracción con el modelo (salida estructurada) | El riesgo principal del PRD es que el modelo "redondee" o invente. Con regex y heurísticas, cada valor tiene evidencia literal y una confianza reproducible; la demo y los tests no necesitan clave. Costo: menos cobertura ante formatos nuevos (se mitiga con revisión humana bajo 0.8). |
 | **CA3 detectado por resultados de herramientas + guarda en el servidor** | Confiar en que el modelo pregunte (solo prompt) o una herramienta `pedir_confirmacion` | La prueba en vivo mostró que el modelo a veces no intenta `registrar` y solo pregunta: detectar por `validar`/`registrar` hace `needsConfirmation` fiable, y la guarda impide autoconfirmar. Una herramienta extra dependería igual de que el modelo la llame. |
 | **Proveedor offline con guion determinista** | Solo mocks en tests | Permite probar la app completa sin clave (también en el link si la clave falla) y es el mismo contrato `ProveedorLlm`. Costo: no conversa libremente; responde ayuda fuera del guion. |
-| **Sesiones en memoria + JSON en `out/sesiones/`** | Base de datos o Redis | El PRD no pide base de datos y hay un solo proceso. Costo: en un disco efímero (Render free) se pierden al reiniciar. |
+| **Sesiones en memoria + JSON en `out/sesiones/`** | Base de datos o Redis | El PRD no pide base de datos y hay un solo proceso. Costo: en el disco efímero del contenedor se pierden al redesplegar. |
+| **Front en Vercel + backend en AWS Lightsail Containers** | Imagen única (API + front) en Render; AWS Lambda con Function URL | Lightsail mantiene un proceso siempre encendido, así que la sesión sobrevive entre "procesa el buzón" y "confirmo…" (en Lambda cada invocación puede caer en otra instancia y habría que llevar sesiones y `out/` a S3). Vercel sirve el front estático desde CDN. Costo: dos orígenes, por eso CORS restringido a `CORS_ORIGINS` y `VITE_API_URL` en el build; Lightsail nano cuesta ≈ 7 USD/mes. |
 | **Render de Markdown propio en el front (subconjunto)** | `react-markdown` + `remark-gfm` | Las respuestas solo usan tablas, títulos, listas, negrita y código; ~100 líneas sin dependencias y sin HTML crudo (React escapa todo, sin superficie de inyección desde el texto del modelo). |
 | **Mantener el `Contrato` completo como argumento de `validar`/`registrar`** | Pasar solo `mensaje_id` + correcciones | Es el contrato de herramientas del PRD. Costo: más tokens y el modelo puede omitir campos `null` o mandar `evidencia: null`; el esquema los tolera y los errores de validación vuelven al modelo, que debe reintentar. |
 
@@ -169,7 +170,7 @@ Determinista sobre `contrato.txt` (`src/extraccion/`), sin modelo:
 | CA5 errores en lenguaje claro | Hecho | Errores de proveedor, timeout y argumentos; tests. |
 | Front, API, adaptador, prompt aparte | Hecho | `web/`, `src/api/`, `src/llm/`, `agent/prompt.md`. |
 | Arranque en un comando | Hecho | `bun run dev` (≈ segundos tras `bun install`). |
-| Link público | Pendiente | Blueprint de Render y Dockerfile listos; falta desplegar. |
+| Link público | Hecho | Front en Vercel (<https://reto02-contratos.vercel.app>) y backend en AWS Lightsail; flujo de la sección 11 del PRD probado contra el link con Gemini. |
 | Bonus `modulo/` | Hecho | Generado desde las mismas piezas + test de sincronía. |
 
 ## 10. Uso de IA
