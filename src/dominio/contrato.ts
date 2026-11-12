@@ -6,7 +6,10 @@ const ConfianzaSchema = z.number().min(0).max(1).describe("Confianza de la extra
 
 const campoSchema = <T extends z.ZodType>(valor: T, descripcion: string) =>
   z.object({
-    valor: valor.nullable().describe(`${descripcion}. null si no aparece en el documento`),
+    valor: valor
+      .nullable()
+      .default(null)
+      .describe(`${descripcion}. null si no aparece en el documento`),
     confianza: ConfianzaSchema,
     evidencia: z.string().optional().describe("Fragmento del documento que respalda el valor"),
   });
@@ -16,8 +19,8 @@ export const TIPOS_DOCUMENTO = ["contrato", "otrosi", "otro"] as const;
 /** Esquema de extracción (PRD 7.2 + HU-2): cada campo del maestro con su confianza. */
 export const ContratoSchema = z.object({
   tipo_documento: z.enum(TIPOS_DOCUMENTO).describe("contrato, otrosi (modifica uno existente) u otro (no es contrato)"),
-  numero_otrosi: z.number().int().positive().nullable().describe("Número del otrosí, null si no es otrosí"),
-  campos_modificados: z.array(z.string()).describe("Campos que el otrosí modifica; vacío si no es otrosí"),
+  numero_otrosi: z.number().int().positive().nullable().default(null).describe("Número del otrosí, null si no es otrosí"),
+  campos_modificados: z.array(z.string()).default([]).describe("Campos que el otrosí modifica; vacío si no es otrosí"),
   valor_indeterminado: z.boolean().describe("true si el contrato es por demanda y no tiene valor total"),
   id_contrato: campoSchema(z.string().min(1), "Número del contrato tal como aparece en el documento"),
   cliente: campoSchema(z.string().min(1), "Razón social del CONTRATANTE (nunca Periferia)"),
@@ -33,7 +36,7 @@ export const ContratoSchema = z.object({
   fecha_fin: campoSchema(FechaIsoSchema, "Fecha de fin YYYY-MM-DD"),
   requiere_poliza: campoSchema(z.boolean(), "Si el contrato exige constituir póliza"),
   tipo_poliza: campoSchema(z.string(), "Tipos de póliza separados por ';', vacío si no requiere"),
-  notas: z.array(z.string()).describe("Heurísticas y supuestos aplicados en la extracción"),
+  notas: z.array(z.string()).default([]).describe("Heurísticas y supuestos aplicados en la extracción"),
 });
 
 export type Contrato = z.infer<typeof ContratoSchema>;
