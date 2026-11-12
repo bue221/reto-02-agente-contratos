@@ -8,6 +8,7 @@ import {
   type Contrato,
   type Propuesta,
 } from "./api";
+import { Markdown } from "./Markdown";
 import { PropuestaCard, ResolucionCard } from "./PropuestaCard";
 import { BuzonView } from "./views/BuzonView";
 import { MaestroView } from "./views/MaestroView";
@@ -197,7 +198,7 @@ export function App() {
       ...(Object.keys(correcciones).length ? { correcciones } : {}),
       ...(comentario.trim() ? { comentario: comentario.trim() } : {}),
     });
-    decir({ role: "assistant", text: `Decisión humana aplicada.\n${res.texto}` });
+    decir({ role: "assistant", text: `Decisión humana aplicada.\n\n${res.texto}` });
     await refresh();
   }
 
@@ -206,7 +207,7 @@ export function App() {
       aprobador: quien(),
       ...(comentario.trim() ? { comentario: comentario.trim() } : {}),
     });
-    decir({ role: "assistant", text: `Decisión humana aplicada.\n${res.texto}` });
+    decir({ role: "assistant", text: `Decisión humana aplicada.\n\n${res.texto}` });
     await refresh();
   }
 
@@ -371,7 +372,9 @@ export function App() {
             <div className="messages">
               {messages.map((m, i) => (
                 <div key={`${m.role}-${i}`} className={`turn ${m.role}`}>
-                  <div className={`bubble ${m.role}`}>{m.text}</div>
+                  <div className={`bubble ${m.role}`}>
+                    {m.role === "assistant" ? <Markdown text={m.text} /> : m.text}
+                  </div>
                   {m.propuestaIds?.length ? (
                     <div className="chat-cards">
                       {m.propuestaIds.map((id) => {

@@ -29,13 +29,13 @@ export function reporteVencimientos(contratos: Contrato[], hoy: string): Reporte
 
 export function formatearReporte(r: Reporte): string {
   const bloque = (titulo: string, filas: FilaAlerta[], vencido = false) => {
-    if (!filas.length) return `${titulo}: ninguno`;
+    if (!filas.length) return `**${titulo}:** ninguno`;
     const lineas = filas.map(({ contrato: c, dias }) =>
-      `  • ${c.id_contrato} ${c.cliente} — ${formatoCOP(c.valor)} — vence ${c.fecha_fin} (${vencido ? `hace ${Math.abs(dias)} d` : `en ${dias} d`}) — ${c.comercial_email}`);
-    return `${titulo}:\n${lineas.join("\n")}`;
+      `- ${c.id_contrato} ${c.cliente} — ${formatoCOP(c.valor)} — vence ${c.fecha_fin} (${vencido ? `hace ${Math.abs(dias)} d` : `en ${dias} d`}) — ${c.comercial_email}`);
+    return `**${titulo}:**\n\n${lineas.join("\n")}`;
   };
   return [
-    `ALERTAS DE VENCIMIENTO (referencia: ${r.hoy})`,
+    `**ALERTAS DE VENCIMIENTO** (referencia: ${r.hoy})`,
     bloque("🔴 Vencidos", r.vencidos, true),
     bloque("🟠 Vencen en ≤ 30 días", r.hasta30),
     bloque("🟡 Vencen en 31–60 días", r.hasta60),

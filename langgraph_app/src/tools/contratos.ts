@@ -30,7 +30,7 @@ export async function ejecutarPipelineMensaje(msgId: string): Promise<string> {
       previa.estado === "PENDIENTE"
         ? `${id} ya tiene una recomendación esperando tu aprobación:`
         : `${id} ya fue resuelto por un humano:`;
-    return `${prefijo}\n${formatearPropuesta(previa)}`;
+    return `${prefijo}\n\n${formatearPropuesta(previa)}`;
   }
   if (enAnalisis.has(id)) return `${id} se está analizando en este momento.`;
 
@@ -64,12 +64,13 @@ export function formatearEstadoBuzon(): string {
   const procesados = mb.listProcessed();
   const porAprobar = getPropuestas().list("PENDIENTE").map((p) => p.msgId);
   return [
-    `Buzón: ${s.total} total · ${s.procesados} analizados · ${s.pendientes} sin analizar.`,
-    pendientes.length ? `Sin analizar: ${pendientes.join(", ")}` : "Sin analizar: (ninguno)",
-    procesados.length ? `Analizados: ${procesados.join(", ")}` : "Analizados: (ninguno)",
+    `**Buzón:** ${s.total} total · ${s.procesados} analizados · ${s.pendientes} sin analizar.`,
+    "",
+    pendientes.length ? `- Sin analizar: ${pendientes.join(", ")}` : "- Sin analizar: (ninguno)",
+    procesados.length ? `- Analizados: ${procesados.join(", ")}` : "- Analizados: (ninguno)",
     porAprobar.length
-      ? `Esperando tu aprobación (${porAprobar.length}): ${porAprobar.join(", ")}`
-      : "Esperando tu aprobación: (ninguna)",
+      ? `- Esperando tu aprobación (${porAprobar.length}): ${porAprobar.join(", ")}`
+      : "- Esperando tu aprobación: (ninguna)",
   ].join("\n");
 }
 
@@ -84,15 +85,16 @@ export function formatearUltimaAuditoria(msgId?: string): string {
     s.campos.length === 0
       ? "(sin extracción de campos)"
       : s.campos
-          .map((c) => `  · ${c.campo}: ${JSON.stringify(c.valor)} (conf=${c.confianza.toFixed(2)})`)
+          .map((c) => `  - ${c.campo}: ${JSON.stringify(c.valor)} (conf=${c.confianza.toFixed(2)})`)
           .join("\n");
   return [
-    `Auditoría ${s.msgId} · ${s.ts} · fase: ${s.fase ?? "n/a"}`,
-    `Decisión: ${s.decision ?? "n/a"} · tipo: ${s.tipo ?? "n/a"} · contrato: ${s.contratoId ?? "—"} · motor: ${s.modelo ?? "n/a"}`,
-    `Confianza media: ${s.confianzaMedia ?? "n/a"} · mínima: ${s.confianzaMin ?? "n/a"}`,
-    "Campos:",
+    `**Auditoría ${s.msgId}** · ${s.ts} · fase: ${s.fase ?? "n/a"}`,
+    "",
+    `- Decisión: ${s.decision ?? "n/a"} · tipo: ${s.tipo ?? "n/a"} · contrato: ${s.contratoId ?? "—"} · motor: ${s.modelo ?? "n/a"}`,
+    `- Confianza media: ${s.confianzaMedia ?? "n/a"} · mínima: ${s.confianzaMin ?? "n/a"}`,
+    "- Campos:",
     campos,
-    s.motivos.length ? `Motivos: ${s.motivos.join("; ")}` : "Motivos: (ninguno)",
+    s.motivos.length ? `- Motivos: ${s.motivos.join("; ")}` : "- Motivos: (ninguno)",
   ].join("\n");
 }
 
@@ -101,9 +103,9 @@ export function formatearListaContratos(): string {
   if (!todos.length) return "El maestro está vacío.";
   const lineas = todos.map(
     (c) =>
-      `${c.id_contrato} · ${c.cliente} · NIT ${c.nit} · ${formatoCOP(c.valor)} ${c.moneda} · ${c.fecha_inicio} → ${c.fecha_fin} · ${c.estado}`,
+      `- **${c.id_contrato}** · ${c.cliente} · NIT ${c.nit} · ${formatoCOP(c.valor)} ${c.moneda} · ${c.fecha_inicio} → ${c.fecha_fin} · ${c.estado}`,
   );
-  return `Maestro (${todos.length} contratos):\n${lineas.join("\n")}`;
+  return `**Maestro** (${todos.length} contratos):\n\n${lineas.join("\n")}`;
 }
 
 export function formatearListaPropuestas(estado?: EstadoPropuesta): string {
@@ -116,7 +118,7 @@ export function formatearListaPropuestas(estado?: EstadoPropuesta): string {
   return items
     .map(
       (p) =>
-        `${p.msgId} · ${p.estado} · recomendación ${p.recomendacion}` +
+        `- **${p.msgId}** · ${p.estado} · recomendación ${p.recomendacion}` +
         (p.resolucion
           ? ` → resuelta por ${p.resolucion.aprobador}: ${p.resolucion.decisionFinal}`
           : ""),
