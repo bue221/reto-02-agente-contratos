@@ -7,21 +7,26 @@ Desde el 30 de mayo de 2026 nadie alimenta el maestro de contratos y solo llegan
 ## 2. Arquitectura
 
 ```
-┌──────────────────────┐  POST /api/chat     ┌──────────────────────────────────────────────┐
-│ Front React (web/)   │ ──────────────────▶ │ Backend Bun + Hono (src/server.ts, src/api/) │
-│ - historial          │ ◀────────────────── │  AgenteContratos (src/agente/ciclo.ts)       │
-│ - tool calls         │  { reply, toolCalls,│   prompt → ProveedorLlm.enviar → llamadas    │
-│ - banner confirmar   │    needsConfirmation}│   → ejecutarHerramienta → … → respuesta      │
-│ - panel maestro      │  GET /api/maestro   │  ProveedorLlm: Gemini (fetch) | Offline       │
-└──────────────────────┘                     │  Sesiones: memoria + out/sesiones/<id>.json   │
-                                             └──────────────┬───────────────────────────────┘
-                                                            │ herramientas contratos_* (zod)
-                                       ┌────────────────────┴────────────────────┐
-                                       ▼                                         ▼
+┌────────────────────────┐  POST /api/chat       ┌──────────────────────────────────────────────┐
+│ Front React (web/)     │ ────────────────────▶ │ Backend Bun + Hono (src/server.ts, src/api/) │
+│ Pestañas:              │ ◀──────────────────── │  AgenteContratos (src/agente/ciclo.ts)       │
+│ - Buzón (7 pasos,      │  { reply, toolCalls,  │   prompt → ProveedorLlm.enviar → llamadas    │
+│   correo vs extracción)│    needsConfirmation} │   → ejecutarHerramienta → … → respuesta      │
+│ - Bandeja de aprobación│  /api/buzon/*         │  Bandeja (src/flujo/bandeja.ts): procesar,   │
+│ - Maestro CSV          │  /api/bandeja/*       │   aprobar, rechazar con las mismas tools     │
+│ - Chat (tool calls,    │  /api/maestro(.csv)   │  ProveedorLlm: Gemini (fetch) | Offline       │
+│   confirmación)        │  /api/demo/reset      │  Sesiones: memoria + out/sesiones/<id>.json   │
+└────────────────────────┘                       │  AccesoOut: turnos/bandeja comparten out/,    │
+                                                 │   el reinicio lo toma en exclusiva            │
+                                                 └──────────────┬───────────────────────────────┘
+                                                                │ herramientas contratos_* (zod)
+                                       ┌────────────────────────┴────────────────────┐
+                                       ▼                                             ▼
                           fixtures/reto-02/ (solo lectura)          out/ (escritura)
                           buzon/, maestro-contratos.csv,            sharepoint/maestro-contratos.csv,
                           comerciales.json                          sharepoint/Contratos/…, historial.jsonl,
-                                                                    procesados.json, log.jsonl, alertas.md
+                                                                    procesados.json, analisis.json,
+                                                                    decisiones.jsonl, log.jsonl, alertas.md
 ```
 
 | Pieza | Dónde vive | Regla |
@@ -31,7 +36,11 @@ Desde el 30 de mayo de 2026 nadie alimenta el maestro de contratos y solo llegan
 | **Ejecución** | `src/tools/contratos.ts` (+ `src/extraccion`, `src/reglas`, `src/casos`, `src/almacen`) | Única fuente de valores. Importable desde `demo.ts`, los tests y `modulo/` sin el servidor. |
 | **Parámetros de negocio** | `src/dominio/parametros.ts` | Umbral, similitud, fecha de corte, ventana de alertas. |
 
-El prompt y el conocimiento **se leen en cada turno**: cambiar una regla del proceso no toca ni reinicia el servidor. El servidor solo compone dependencias (`src/server.ts`) y expone HTTP (`src/api/app.ts`); el ciclo solo conoce la interfaz `ProveedorLlm`.
+El prompt y el conocimiento **se leen en cada turno**: cambiar una regla del proceso no toca ni reinicia el servidor. El servidor solo compone dependencias (`src/server.ts`) y expone HTTP (`src/api/app.ts` y `src/api/hitl.ts`, rutas delgadas); el ciclo solo conoce la interfaz `ProveedorLlm`.
+
+**Human-in-the-loop fuera del chat.** Además del chat, el front tiene un **Buzón** (estado de cada correo derivado de `out/`, línea de tiempo de 7 pasos y el correo al lado de la extracción) y una **Bandeja de aprobación**. Ninguna acción de la bandeja tiene lógica de negocio propia: `procesar` es la misma pasada extraer → validar → registrar de `demo.ts`, `aprobar` llama a `contratos_registrar` con `confirmado: true` y el contrato corregido, y `rechazar` cierra el mensaje como `rechazado`. Todo pasa por `ejecutarHerramienta` (zod + `out/log.jsonl`) y cada decisión humana queda en `out/decisiones.jsonl` con quién, cuándo, por qué canal y qué corrigió.
+
+**Reinicio de la demo.** `out/` es global al proceso: en el link público, quien procesa el buzón lo deja procesado para todos. `POST /api/demo/reset` (botón **Reiniciar demo**) borra `out/` (incluidas sesiones y pendientes de confirmación) y vuelve a copiar el maestro del fixture. `AccesoOut` coordina el acceso: turnos del chat y acciones de la bandeja lo comparten y el reinicio lo toma en exclusiva, así que espera a que termine un turno en curso y retiene los nuevos hasta acabar.
 
 ## 3. Ciclo del agente
 
@@ -51,6 +60,9 @@ El prompt y el conocimiento **se leen en cada turno**: cambiar una regla del pro
 - Si el turno deja pendientes nuevos, la respuesta lleva `needsConfirmation: true`; si el texto del modelo no termina en pregunta, el ciclo agrega una pregunta explícita. El front resalta la burbuja y muestra un banner con botón **Confirmo**.
 - **Guarda en el servidor** (`src/agente/ejecucion.ts`): `registrar` con `confirmado: true` solo se ejecuta para mensajes que quedaron pendientes **en un turno anterior**. El modelo no puede autoconfirmar en el mismo turno en que detecta la duda: recibe un error y debe preguntar.
 - Además, `registrar` vuelve a extraer el documento en el servidor: si el modelo cambia un valor, ese campo queda con confianza 0 y solo pasa con `confirmado: true`.
+- **Una sola verdad para chat y bandeja**: `validar` y `registrar` (sin confirmar) guardan el último análisis de cada mensaje en `out/analisis.json`. Un mensaje *espera confirmación* si ese análisis es `nuevo`/`actualizacion` con campos en revisión y no está en `procesados.json`. Así, lo que el chat deja en revisión aparece en la bandeja, y lo que se aprueba o rechaza en cualquiera de los dos sale de ambos: al empezar cada turno, la sesión descarta los pendientes que ya se cerraron en otro canal, y una confirmación tardía en el chat recibe «ya fue procesado» en lugar de registrar dos veces.
+- **La bandeja también cumple CA3**: solo aprueba o rechaza mensajes que esperan confirmación (`409 no_pendiente` si no), con un humano identificado (`aprobador`). Las correcciones se validan con el mismo esquema zod de los campos del contrato y quedan con confianza 1 y evidencia «corregido por …»; el servidor revalida todo antes de escribir.
+- Un mensaje ya cerrado no se reevalúa: validarlo de nuevo contra el maestro que él mismo actualizó lo marcaría como duplicado.
 
 Verificado con Gemini real (dos turnos del PRD §11): primer turno con 15 llamadas (lectura, 5 extracciones, 5 validaciones, 3 registros, alertas), msg-006 sin registrar y `needsConfirmation: true`; tras «confirmo el valor 0 y la fecha fin 2027-08-31», una llamada a `registrar` con `confirmado: true` → `insertado CM-2026-03`.
 
@@ -107,6 +119,9 @@ Determinista sobre `contrato.txt` (`src/extraccion/`), sin modelo:
 | **Proveedor offline con guion determinista** | Solo mocks en tests | Permite probar la app completa sin clave (también en el link si la clave falla) y es el mismo contrato `ProveedorLlm`. Costo: no conversa libremente; responde ayuda fuera del guion. |
 | **Sesiones en memoria + JSON en `out/sesiones/`** | Base de datos o Redis | El PRD no pide base de datos y hay un solo proceso. Costo: en el disco efímero del contenedor se pierden al redesplegar. |
 | **Front en Vercel + backend en AWS Lightsail Containers** | Imagen única (API + front) en Render; AWS Lambda con Function URL | Lightsail mantiene un proceso siempre encendido, así que la sesión sobrevive entre "procesa el buzón" y "confirmo…" (en Lambda cada invocación puede caer en otra instancia y habría que llevar sesiones y `out/` a S3). Vercel sirve el front estático desde CDN. Costo: dos orígenes, por eso CORS restringido a `CORS_ORIGINS` y `VITE_API_URL` en el build; Lightsail nano cuesta ≈ 7 USD/mes. |
+| **Bandeja de aprobación además del chat** | Solo el chat | La analista revisa campo por campo con la evidencia al lado y corrige en un formulario, sin depender de que el modelo traduzca bien «confirmo …». La bandeja no duplica reglas: llama a las mismas herramientas, así que RN5 y la revalidación en el servidor son idénticas. |
+| **Estado de revisión derivado de `out/` (`analisis.json` + `procesados.json`)** | Pendientes solo dentro de cada sesión de chat | Con pendientes por sesión, la bandeja no vería lo que dejó el chat y una aprobación en la bandeja no se reflejaría en el chat. Derivarlo de archivos que ya escriben las herramientas da una fuente única. Costo: la guarda CA3 del chat sigue siendo por sesión (el agente debe haber preguntado en esa conversación). |
+| **Reinicio de la demo por API con cerrojo lector/escritor** | Redesplegar para limpiar `out/` | El link público es compartido: sin reinicio, el primero que procesa el buzón deja a los demás sin nada que probar. El cerrojo evita borrar `out/` en medio de un turno. |
 | **Render de Markdown propio en el front (subconjunto)** | `react-markdown` + `remark-gfm` | Las respuestas solo usan tablas, títulos, listas, negrita y código; ~100 líneas sin dependencias y sin HTML crudo (React escapa todo, sin superficie de inyección desde el texto del modelo). |
 | **Mantener el `Contrato` completo como argumento de `validar`/`registrar`** | Pasar solo `mensaje_id` + correcciones | Es el contrato de herramientas del PRD. Costo: más tokens y el modelo puede omitir campos `null` o mandar `evidencia: null`; el esquema los tolera y los errores de validación vuelven al modelo, que debe reintentar. |
 
@@ -154,10 +169,10 @@ Determinista sobre `contrato.txt` (`src/extraccion/`), sin modelo:
 
 | Historia | Estado | Qué falta para producción |
 |---|---|---|
-| HU-1 Leer el buzón | Hecho | Conector real a Exchange/Graph en lugar de carpetas; leer adjuntos PDF. |
+| HU-1 Leer el buzón | Hecho (chat y pestaña Buzón con estado por correo) | Conector real a Exchange/Graph en lugar de carpetas; leer adjuntos PDF. |
 | HU-2 Extraer | Hecho | OCR para escaneos; más formatos de contrato; `contratos_leer_pdf`. |
 | HU-3 Validar y clasificar | Hecho | Normalización de razón social más robusta; maestro con más volumen (índices). |
-| HU-4 Registrar y archivar | Hecho | SharePoint real (Graph API), escrituras transaccionales y bloqueo entre procesos. |
+| HU-4 Registrar y archivar | Hecho (confirmación desde el chat o la Bandeja de aprobación) | SharePoint real (Graph API), escrituras transaccionales y bloqueo entre procesos. |
 | HU-5 Alertar | Hecho | Envío programado del reporte (correo/Teams) y fecha `hoy` automática. |
 | HU-6 Manejo de errores | Hecho | Reintentos con backoff ante fallos transitorios del proveedor. |
 
@@ -165,7 +180,8 @@ Determinista sobre `contrato.txt` (`src/extraccion/`), sin modelo:
 |---|---|---|
 | CA1 tope de iteraciones | Hecho | `MAX_ITERACIONES`; test "CA1". |
 | CA2 no afirmar valores sin herramienta | Parcial | Prompt + diseño (el modelo no es fuente de valores); un modelo aún puede resumir de memoria (ver riesgos). |
-| CA3 confirmación humana | Hecho | Detección determinista, pregunta forzada, guarda en servidor, banner en el front; tests. |
+| CA3 confirmación humana | Hecho | Detección determinista, pregunta forzada, guarda en servidor, banner en el chat y Bandeja de aprobación que comparte la misma verdad; tests de chat ↔ bandeja. |
+| Bandeja HITL y reinicio de la demo | Hecho | `/api/buzon`, `/api/bandeja`, `/api/demo/reset`; tests de aprobar con correcciones (msg-006 → valor 0, fin 2027-08-31), rechazar, errores zod y reinicio durante un turno. |
 | CA4 llamadas visibles y en log | Hecho | `toolCalls`, historial de sesión, `out/log.jsonl`; test. |
 | CA5 errores en lenguaje claro | Hecho | Errores de proveedor, timeout y argumentos; tests. |
 | Front, API, adaptador, prompt aparte | Hecho | `web/`, `src/api/`, `src/llm/`, `agent/prompt.md`. |
@@ -193,6 +209,7 @@ Descartado de lo propuesto: mantener LangGraph (más dependencias y comportamien
 | Contratos escaneados o formatos nuevos que la extracción no reconoce. | OCR + extracción asistida por modelo **solo como propuesta**; todo lo bajo 0.8 sigue pasando por revisión humana. Medir % de campos en revisión por mes. |
 | El modelo afirma o recalcula un valor de memoria (en la prueba en vivo actualizó una lista de alertas sin volver a llamar la herramienta). | Regla en el prompt; validar en el servidor que cifras e ids de la respuesta existan en resultados de herramientas del turno; tablas renderizadas desde `toolCalls` en lugar de texto libre. |
 | Inyección de instrucciones desde el texto del contrato o del correo. | Las herramientas son la única vía de escritura, no hay shell ni edición de archivos, y `confirmado` lo controla el servidor. Delimitar el texto de documentos en los resultados. |
+| Estado compartido en el link público: cualquiera puede procesar, aprobar o reiniciar la demo para todos. | Aceptable para la demo (botón con confirmación). En producción: autenticación, aprobador tomado de la identidad y no de un campo libre, reinicio deshabilitado. |
 | Abuso del link público y gasto de la clave. | Topes de iteraciones y tokens por sesión y por proceso; en producción, autenticación (SSO) y límite por IP/usuario. |
 | Pérdida de datos: disco efímero, CSV sin transacciones, varios procesos. | Persistir en SharePoint/almacenamiento durable; escritura atómica y bloqueo; respaldo diario del maestro y del historial. |
 | Datos personales y comerciales en `out/log.jsonl` y sesiones. | Retención limitada, acceso restringido, no registrar el texto completo del contrato en logs. |

@@ -1,6 +1,6 @@
 # Reto 02 · Agente conversacional "Registro de Contratos Vigentes"
 
-Agente de chat que actúa como **punto único de recepción de contratos**: lee el buzón, extrae los datos de cada contrato con confianza por campo, lo clasifica contra el maestro (nuevo, actualización, duplicado, rechazado), registra lo limpio, **pide confirmación humana** para lo dudoso y genera el reporte de alertas. Backend Bun + Hono, herramientas tipadas con zod, adaptador LLM propio (Gemini 2.5 Flash) y front React.
+Agente de chat que actúa como **punto único de recepción de contratos**: lee el buzón, extrae los datos de cada contrato con confianza por campo, lo clasifica contra el maestro (nuevo, actualización, duplicado, rechazado), registra lo limpio, **pide confirmación humana** para lo dudoso y genera el reporte de alertas. La confirmación se puede dar en el chat o en una **bandeja de aprobación**. Backend Bun + Hono, herramientas tipadas con zod, adaptador LLM propio (Gemini 2.5 Flash) y front React.
 
 - **Link de prueba**: <https://reto02-contratos.vercel.app> (público, sin clave de acceso).
 - **Backend (AWS Lightsail)**: <https://reto02-contratos.wn60e6ytewk9j.us-east-1.cs.amazonlightsail.com/api/health>
@@ -33,7 +33,22 @@ esté limpio, muéstrame lo que requiere revisión campo por campo y termina
 con el reporte de alertas. No registres nada dudoso sin preguntarme.
 ```
 
-Luego: `confirmo el valor 0 y la fecha fin 2027-08-31` (o el botón **Confirmo** del banner). Para repetir la demo desde cero, borra `out/` y abre una sesión nueva.
+Luego: `confirmo el valor 0 y la fecha fin 2027-08-31` (o el botón **Confirmo** del banner, o **Confirmar datos y registrar** en la Bandeja de aprobación).
+
+### Interfaz
+
+| Pestaña | Qué muestra |
+|---|---|
+| **Buzón** | Los 6 correos con su estado (sin analizar, por aprobar, registrado, actualizado, duplicado, rechazado). **Analizar** procesa uno (extraer → validar → registrar sin confirmación) y **Analizar todo en orden** recorre los pendientes con progreso y botón **Detener**. El detalle trae una línea de tiempo de 7 pasos, el correo y el adjunto al lado de lo extraído con confianza y evidencia por campo, la clasificación y la auditoría de `out/log.jsonl`. |
+| **Bandeja de aprobación** | Lo que espera una decisión humana (con un contador en la pestaña): campos en revisión editables, **Confirmar datos y registrar** (con correcciones) o **Rechazar** con motivo. A la derecha, las decisiones ya tomadas, aquí o en el chat: quién, cuándo, qué corrigió y qué se escribió. |
+| **Maestro CSV** | `out/sharepoint/maestro-contratos.csv` con las filas creadas o modificadas por una aprobación resaltadas, y **Descargar CSV**. |
+| **Chat** | El agente: cada llamada a herramienta (nombre, argumentos, resultado) y la burbuja resaltada cuando pide confirmación. |
+
+El nombre del **Aprobador** (barra lateral) queda en las decisiones. Chat y bandeja comparten la misma verdad: lo que el chat deja en revisión aparece en la bandeja y lo que se aprueba en cualquiera de los dos sale de ambos.
+
+### Reiniciar la demo
+
+El estado de `out/` es **global al proceso**: en el link público, quien procese el buzón lo deja procesado para todos. Para empezar de cero usa **Reiniciar demo** en la barra lateral (pide confirmación): borra `out/` (procesados, análisis, decisiones, log, sesiones de chat), vuelve a copiar el maestro del fixture, refresca las pestañas y abre una sesión de chat nueva. Por API: `curl -X POST <backend>/api/demo/reset`.
 
 ## Variables de entorno
 
@@ -56,7 +71,7 @@ Todas opcionales; ver [`.env.example`](.env.example). La clave solo vive en el b
 
 ```bash
 bun install && bun run demo.ts   # procesa los 6 mensajes llamando directo a las herramientas
-bun test                         # 67 pruebas: extracción, reglas, herramientas, ciclo, API, módulo
+bun test                         # 84 pruebas: extracción, reglas, herramientas, ciclo, API, bandeja, reinicio, módulo
 bun run typecheck                # backend + front
 ```
 
@@ -69,9 +84,17 @@ bun run typecheck                # backend + front
 | `POST` | `/api/chat` | `{ sessionId, message }` → `{ reply, toolCalls: [{ nombre, args, ok, resumen }], needsConfirmation }` |
 | `GET` | `/api/sessions/:id` | Sesión completa: `turnos[]` visibles, `mensajes[]` del modelo, `tokens`, `pendientesConfirmacion[]` |
 | `GET` | `/api/health` | `{ ok: true, provider, model }` (sin claves) |
-| `GET` | `/api/maestro` | `{ filas[] }` del maestro de trabajo (`out/sharepoint/maestro-contratos.csv`), solo lectura para el panel lateral |
+| `GET` | `/api/maestro` | `{ filas[] }` del maestro de trabajo (`out/sharepoint/maestro-contratos.csv`) |
+| `GET` | `/api/maestro.csv` | Descarga del CSV del maestro de trabajo |
+| `GET` | `/api/buzon` | `{ contadores: { total, pendientes, requiere_revision, procesados }, mensajes[], errores[] }`; cada mensaje con `estado` (`pendiente`, `requiere_revision`, `registrado`, `actualizado`, `duplicado`, `rechazado`), `clasificacion`, `id_contrato` y `decidido_por` |
+| `GET` | `/api/buzon/:id` | Detalle de solo lectura: correo, adjuntos con texto, extracción con `confianza` y `evidencia` por campo (tras analizar), validación (`clasificacion`, `requiere_revision`, `revisiones`, `diferencias`, `avisos`), decisión humana, fila del maestro, `linea_tiempo[7]`, historial y log del mensaje |
+| `POST` | `/api/buzon/:id/procesar` | extraer → validar → registrar **sin** confirmación (igual que `demo.ts`): lo limpio se registra, lo dudoso pasa a la bandeja. `409 ya_procesado` si ya se cerró |
+| `GET` | `/api/bandeja` | `{ pendientes: [{ mensaje, validacion, contrato, desde }], resueltas: [decisiones] }` |
+| `POST` | `/api/bandeja/:id/aprobar` | `{ aprobador, correcciones? }` → `contratos_registrar` con `confirmado: true` y el contrato corregido (el servidor vuelve a validar). `correcciones` acepta solo campos del contrato con su tipo, p. ej. `{ "valor": 0, "fecha_fin": "2027-08-31" }` |
+| `POST` | `/api/bandeja/:id/rechazar` | `{ aprobador, motivo }` → cierra el mensaje como `rechazado` sin tocar el maestro |
+| `POST` | `/api/demo/reset` | `{ ok: true, mensajes }`: vacía `out/` y las sesiones y vuelve a copiar el maestro; espera a que terminen los turnos de chat en curso |
 
-Errores tipados: `{ ok: false, error: { codigo, mensaje } }` con `400` (cuerpo inválido: `sessionId` con `[A-Za-z0-9_-]{1,64}`, `message` de 1 a 4000 caracteres), `404` y `500`. Un error del modelo o de una herramienta **no** es un error HTTP: vuelve como `reply` en lenguaje claro y la sesión sigue (CA5).
+Errores tipados: `{ ok: false, error: { codigo, mensaje } }` con `400 peticion_invalida` (cuerpo que no cumple el esquema zod o JSON roto: `sessionId` con `[A-Za-z0-9_-]{1,64}`, `message` de 1 a 4000 caracteres, `aprobador` y `motivo` obligatorios, `correcciones` sin campos desconocidos), `404` (`mensaje_no_encontrado`, `sesion_no_encontrada`, `ruta_no_encontrada`), `409` (`ya_procesado`, `no_pendiente`: solo se aprueba o rechaza lo que espera confirmación), `422 registro_fallido` y `500`. Un error del modelo o de una herramienta en el chat **no** es un error HTTP: vuelve como `reply` en lenguaje claro y la sesión sigue (CA5). Cada acción de la bandeja pasa por las mismas herramientas y queda en `out/log.jsonl` (`bandeja_aprobar`, `bandeja_rechazar`); las decisiones humanas, en `out/decisiones.jsonl`.
 
 ## Estructura
 
@@ -80,10 +103,12 @@ agent/prompt.md                     comportamiento (system prompt)
 src/knowledge/registro-contratos.md conocimiento del proceso (reglas, esquema, gobierno)
 src/tools/contratos.ts              herramientas contratos_* (zod, nunca lanzan, log en out/log.jsonl)
 src/agente/                         ciclo del agente, sesiones, guarda de confirmación
+src/casos/                          casos de uso: validar, registrar, estado de mensajes, vistas del buzón, línea de tiempo, reinicio
+src/flujo/                          orquestación sobre las herramientas: pasada de demo.ts y acciones de la bandeja
 src/llm/                            adaptador (adapter.ts), Gemini (gemini.ts), offline (offline.ts)
-src/api/                            app Hono y tipos compartidos con el front
+src/api/                            app Hono (chat en app.ts, buzón/bandeja/reinicio en hitl.ts) y tipos compartidos con el front
 src/server.ts                       arranque
-web/src/chat/                       front de chat
+web/src/                            front: App.tsx (pestañas), views/ (Buzón, Bandeja, Maestro), chat/, api.ts (cliente único)
 modulo/                             bonus: agente empaquetado (generado desde agent/ y src/knowledge/)
 demo.ts                             verificación sin modelo
 ```
@@ -129,6 +154,6 @@ Para apagar el backend al terminar la defensa: `aws lightsail delete-container-s
 
 **Alternativa en un solo servicio**: el blueprint [`render.yaml`](render.yaml) despliega la misma imagen (API + front) en Render; solo hay que cargar `GOOGLE_API_KEY` como secreto.
 
-Notas: el contexto de build usa [`Dockerfile.dockerignore`](Dockerfile.dockerignore) (BuildKit lo prefiere sobre `.dockerignore`, que hoy excluye `src/` y `web/` por la versión anterior en `langgraph_app/`). El disco del contenedor es efímero: `out/` y las sesiones se pierden al redesplegar o reiniciar, lo cual es aceptable para la demo.
+Notas: el contexto de build usa [`Dockerfile.dockerignore`](Dockerfile.dockerignore) (BuildKit lo prefiere sobre `.dockerignore`, que hoy excluye `src/` y `web/` por la versión anterior en `langgraph_app/`). El disco del contenedor es efímero: `out/` y las sesiones se pierden al redesplegar o reiniciar, lo cual es aceptable para la demo; mientras el contenedor vive, **Reiniciar demo** deja el buzón limpio sin redesplegar.
 
 > `langgraph_app/` es la versión anterior (LangGraph) y no forma parte de esta entrega.
