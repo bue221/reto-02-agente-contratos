@@ -1,13 +1,13 @@
 # Pruebas
 
-Runner: `bun test` (sin dependencias extra). 112 pruebas: 106 de la API en `api/tests/` y 6 de los grafos de LangGraph en `studio/tests/` ([LangGraph Studio](Studio.md)); ninguna necesita clave ni red. Se ejecutan con `bun run test` desde la raíz, o `bun test` desde la raíz (todas) o desde `api/` o `studio/`.
+Runner: `bun test` (sin dependencias extra). 148 pruebas: 141 de la API en `api/tests/` y 7 de los grafos de LangGraph en `studio/tests/` ([LangGraph Studio](Studio.md)); ninguna necesita clave ni red. Se ejecutan con `bun run test` desde la raíz, o `bun test` desde la raíz (todas) o desde `api/` o `studio/`.
 
 ## Organización
 
 | Carpeta | Qué prueba | Archivos |
 |---|---|---|
-| `api/tests/unit/` | Funciones puras o con dependencias simuladas. | `extraction.test.ts` (extractor, errores legibles, utilidades), `llm.test.ts` (adaptador Gemini con `fetch` simulado, selección de proveedor). |
-| `api/tests/integration/` | Varias capas juntas sobre un proyecto temporal con los fixtures reales. | `tools.test.ts` (buzón completo PRD §7.4, RN5/CA3, alertas, HU-6, zod), `agent.test.ts` (ciclo de la recepcionista con offline y proveedores falsos, CA1–CA5, el modelo solo ve `recepcion_*`), `receptionist.test.ts` (herramientas `recepcion_*`, recorrido del grafo, pausa y reanudación), `api.test.ts` (chat, errores, CORS), `approval-tray.test.ts` (buzón, bandeja, chat ↔ bandeja, reinicio), `module.test.ts` (sincronía de `modulo/`). |
+| `api/tests/unit/` | Funciones puras o con dependencias simuladas. | `extraction.test.ts` (extractor, errores legibles, utilidades), `llm.test.ts` (adaptador Gemini con `fetch` simulado, selección de proveedor), `guardrails.test.ts` (reglas de manipulación, clasificador de alcance, canario de salida). |
+| `api/tests/integration/` | Varias capas juntas sobre un proyecto temporal con los fixtures reales. | `tools.test.ts` (buzón completo PRD §7.4, RN5/CA3, alertas, HU-6, zod), `agent.test.ts` (ciclo de la recepcionista con offline y proveedores falsos, CA1–CA5, el modelo solo ve `recepcion_*`, guardas de entrada y salida), `receptionist.test.ts` (herramientas `recepcion_*`, recorrido del grafo, pausa y reanudación), `api.test.ts` (chat, errores, CORS), `approval-tray.test.ts` (buzón, bandeja, chat ↔ bandeja, reinicio), `module.test.ts` (sincronía de `modulo/`). |
 | `api/tests/helpers.ts` | Utilidades compartidas. | — |
 
 ## Utilidades (`api/tests/helpers.ts`)

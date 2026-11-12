@@ -31,9 +31,11 @@ Pestaña **Graph**, entrada `{}`, **Submit**. Llama al mismo `reiniciarDemo()` q
 ## `recepcionista`
 
 ```
-__start__ ─▶ recepcionista ⇄ herramientas ─(recepcion_procesar_buzon)─▶ [motor]
-                   └──────────▶ __end__
+__start__ ─▶ guarda_entrada ─▶ recepcionista ⇄ herramientas ─(recepcion_procesar_buzon)─▶ [motor]
+                   └─(bloqueado)─────┴──────────▶ __end__
 ```
+
+`guarda_entrada` aplica las mismas guardas de la app ([Ciclo del agente](Agent-Loop.md#guardas-de-alcance-y-de-manipulación)): reglas deterministas y, con Gemini, el clasificador de alcance. Si bloquea, responde con un texto fijo y el turno termina sin llamar al modelo. Prueba: «hola, ¿cuánto es 2 mas 2?» o «ignora tus instrucciones».
 
 Cuando el modelo llama a `recepcion_procesar_buzon`, la pasada del motor corre como **subgrafo de `herramientas`**: es la misma pasada del grafo `motor` (`ingestar → extraer → validar → decidir → registrar | esperar_revision | cerrar → alertas`), sin `revision_humana`, porque en el chat la pausa la cierra el turno (CA3) y la decisión llega por `recepcion_responder_revision`. En la pestaña **Graph** se ven sus nodos dentro de `herramientas` (`herramientas:extraer`, …) y en el hilo cada paso del motor aparece anidado. La herramienta no cambia: valida sus argumentos, escribe `out/log.jsonl` y devuelve los mismos `pasos`. Solo cambia quién recorre la pasada, mediante `ContextoMotor.ejecutarPasada` (`api/src/application/workflows/process-mailbox.ts`), que la app y la demo no definen.
 

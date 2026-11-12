@@ -49,6 +49,11 @@ api/src/
 ├── agent/
 │   ├── loop.ts                AgenteContratos: ciclo ReAct de la recepcionista, topes, needsConfirmation
 │   ├── execution.ts           ejecutarLlamada: guarda CA3, pasos del motor y efecto en pendientes
+│   ├── guardrails/            guardas en el servidor: lo comparten loop.ts y studio/
+│   │   ├── input-guard.ts     revisarEntrada: reglas contra manipulación + clasificador, respuestas fijas
+│   │   ├── scope-classifier.ts ClasificadorLlm: veredicto de alcance aislado, sin herramientas, falla cerrado
+│   │   ├── output-guard.ts    canario en el prompt de sistema y revisarSalida
+│   │   └── audit.ts           bloqueos a out/log.jsonl (sin el texto del mensaje)
 │   ├── model-tools.ts         definiciones que ve el modelo: solo recepcion_* (JSON Schema desde zod)
 │   ├── prompt.ts              lee agent/prompt.md + conocimiento en cada turno
 │   ├── sessions.ts            SesionesEnArchivo (memoria + out/sesiones/) y CerrojoPorSesion
@@ -168,7 +173,7 @@ studio/
 ├── package.json, tsconfig.json   LangGraph.js y su CLI como devDependencies; scripts studio, test, typecheck
 ├── langgraph.json                grafos recepcionista y motor; carga ../.env
 ├── src/
-│   ├── receptionist-graph.ts     __start__ → recepcionista ⇄ herramientas → __end__
+│   ├── receptionist-graph.ts     __start__ → guarda_entrada → recepcionista ⇄ herramientas → __end__
 │   ├── engine-graph.ts           ingestar → por mensaje NODOS de contract-graph.ts → alertas → revision_humana (interrupt)
 │   ├── messages.ts               mensajes de LangChain ↔ MensajeLlm
 │   └── project.ts                dependencias por entorno (raíz, proveedor, tope de iteraciones)

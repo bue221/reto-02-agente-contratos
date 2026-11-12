@@ -82,7 +82,7 @@ Abre <https://smith.langchain.com/studio?baseUrl=http://localhost:2024>. Es solo
 
 ```bash
 bun install && bun run demo.ts   # procesa los 6 mensajes llamando directo a las herramientas
-bun run test                     # 112 pruebas: api/tests (extracción, reglas, herramientas, motor, ciclo, HTTP, bandeja, reinicio, módulo) y studio/tests
+bun run test                     # 148 pruebas: api/tests (extracción, reglas, herramientas, motor, ciclo, guardas, HTTP, bandeja, reinicio, módulo) y studio/tests
 bun run typecheck                # api + web
 ```
 
@@ -119,7 +119,7 @@ api/                                 backend Bun + Hono (workspace)
 │   ├── config.ts                    variables de entorno validadas con zod
 │   ├── knowledge/registro-contratos.md  conocimiento del proceso (reglas, esquema, gobierno)
 │   ├── tools/                       recepcion_* que ve el modelo (recepcion.ts), contratos_* del PRD (contratos.ts) y envoltorio común (tool.ts)
-│   ├── agent/                       ciclo ReAct de la recepcionista, guarda de confirmación, sesiones, prompt
+│   ├── agent/                       ciclo ReAct de la recepcionista, guardas (confirmación, alcance, manipulación), sesiones, prompt
 │   ├── llm/                         adaptador (adapter.ts), Gemini, offline y fábrica
 │   ├── http/                        rutas Hono (chat en app.ts, buzón/bandeja/reinicio en hitl.ts) y tipos compartidos con el front
 │   ├── application/use-cases/       validar, registrar, alertas, estado de mensajes, vistas del buzón, línea de tiempo, reinicio

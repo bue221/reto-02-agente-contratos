@@ -1,10 +1,12 @@
 import { leerConfiguracion } from "../../api/src/config.ts";
+import type { ClasificadorDeAlcance } from "../../api/src/agent/guardrails/input-guard.ts";
+import { crearClasificador } from "../../api/src/agent/guardrails/scope-classifier.ts";
 import { crearProveedor } from "../../api/src/llm/factory.ts";
 import type { ProveedorLlm } from "../../api/src/llm/adapter.ts";
 
 /**
  * Lo que comparten los grafos de Studio con la app: la misma raíz del proyecto (mismo `out/`, así lo que
- * se haga en Studio aparece en el buzón y la bandeja) y el mismo proveedor elegido por entorno.
+ * se haga en Studio aparece en el buzón y la bandeja), el mismo proveedor y las mismas guardas elegidas por entorno.
  */
 
 export interface DependenciasStudio {
@@ -14,9 +16,12 @@ export interface DependenciasStudio {
   maxIteraciones: number;
   /** Por defecto `agent/prompt.md` + conocimiento, leídos en cada turno como en la app. */
   cargarSistema?: () => Promise<string>;
+  /** Clasificador de alcance de la guarda de entrada; sin él solo rigen las reglas deterministas. */
+  clasificador?: ClasificadorDeAlcance | undefined;
 }
 
 export function dependenciasPorEntorno(): DependenciasStudio {
   const config = leerConfiguracion(process.env);
-  return { directorio: config.directorio, proveedor: crearProveedor(config), maxIteraciones: config.maxIteraciones };
+  const proveedor = crearProveedor(config);
+  return { directorio: config.directorio, proveedor, maxIteraciones: config.maxIteraciones, clasificador: crearClasificador(config.proveedor, proveedor) };
 }

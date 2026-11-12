@@ -1,6 +1,6 @@
 # Ciclo del agente
 
-Código: `api/src/agent/loop.ts` (`AgenteContratos`), `api/src/agent/execution.ts` (guarda de confirmación), `api/src/agent/sessions.ts`, `api/src/agent/prompt.ts`, `api/src/agent/model-tools.ts`.
+Código: `api/src/agent/loop.ts` (`AgenteContratos`), `api/src/agent/execution.ts` (guarda de confirmación), `api/src/agent/guardrails/` (guardas de alcance y manipulación), `api/src/agent/sessions.ts`, `api/src/agent/prompt.ts`, `api/src/agent/model-tools.ts`.
 
 El ciclo es un **ReAct de la recepcionista**: el modelo solo ve las cinco herramientas `recepcion_*` y decide cuándo consultar, cuándo encender el motor y cuándo reanudarlo. El camino de cada contrato (extraer → validar → decidir → registrar / pausar / cerrar → alertas) lo fija el motor determinista; ver [Arquitectura → Dos grafos](Architecture.md#dos-grafos-la-recepcionista-y-el-motor).
 
@@ -83,6 +83,20 @@ La excepción es un mensaje ya cerrado: pasa a la reanudación, que responde «y
 ```
 
 **Una sola verdad con la bandeja**: chat y bandeja reanudan la pausa con la misma función (`aprobar` / `rechazar` de `approval-tray.ts`). Una decisión tomada en el chat se anota en `out/decisiones.jsonl` con `via: "chat"` y aparece en la bandeja junto a las decisiones tomadas allí.
+
+## Guardas de alcance y de manipulación
+
+La recepcionista solo atiende la recepción de contratos. La sección «Alcance» de `agent/prompt.md` lo pide, pero un prompt se puede desarmar con otro prompt, así que el servidor lo impone con guardas en `api/src/agent/guardrails/`. El ciclo de la app y el grafo de Studio usan las mismas.
+
+| Capa | Qué hace | Si bloquea |
+|---|---|---|
+| **Reglas deterministas** (`input-guard.ts`, `reglaDeManipulacion`) | Expresiones sobre el texto normalizado: anular instrucciones, pedir el prompt de sistema o la configuración, cambio de rol, «modo desarrollador» o *jailbreak*, pedir la clave del modelo, etiquetas `<system>` o `[INST]`. | Respuesta fija sin llamar al modelo ni al clasificador. |
+| **Clasificador de alcance** (`scope-classifier.ts`, `ClasificadorLlm`) | Llamada aparte al mismo `ProveedorLlm`: sin herramientas ni historial, con prompt fijo en el código. Recibe el mensaje y la última respuesta de la recepcionista (para entender un «sí, confirmo») entre etiquetas, con `<` y `>` neutralizados. Solo puede devolver `permitido`, `fuera_de_alcance` o `manipulacion`, validado con zod. Lo mezclado («procesa el buzón y escríbeme un poema») es `fuera_de_alcance`. | Respuesta fija. Si el clasificador falla o devuelve otra cosa, el mensaje **no pasa** (falla cerrado) y se pide reintentar. |
+| **Guarda de salida** (`output-guard.ts`) | Un canario aleatorio por proceso va al inicio del prompt de sistema. Si aparece en la respuesta del modelo, está volcando sus instrucciones. | La respuesta se reemplaza por una fija antes de llegar al chat. |
+
+Las respuestas de bloqueo no las redacta el modelo y recuerdan lo que sigue pendiente de confirmación. Un mensaje bloqueado no entra al historial que se reenvía al modelo: en la app queda solo en `turnos`, y en Studio `aMensajesLlm` omite el par marcado con `additional_kwargs.bloqueado`. Así no contamina los turnos siguientes. Cada bloqueo queda en `out/log.jsonl` como `guarda_entrada` o `guarda_salida`, con el motivo y sin el texto del mensaje. Los tokens del clasificador cuentan para los topes de costo, y con el tope alcanzado no se llama.
+
+El clasificador se activa con Gemini (`crearClasificador`). Con el proveedor offline solo rigen las reglas deterministas: su guion no se puede desviar y responde su ayuda ante todo lo que no reconoce. El clasificador también es un modelo y se podría engañar, pero lo peor que se logra es un `permitido`: el mensaje sigue frente al prompt, al conjunto de cinco `recepcion_*`, a la guarda CA3 y a la revalidación del motor.
 
 ## Topes de costo
 

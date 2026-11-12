@@ -19,9 +19,15 @@ function firmasDe(mensaje: BaseMessage): Record<string, string> {
   return typeof firmas === "object" && firmas !== null ? (firmas as Record<string, string>) : {};
 }
 
+/** Marca la respuesta fija de la guarda de entrada: ni ella ni el mensaje que bloqueó vuelven al modelo. */
+export const CLAVE_BLOQUEO = "bloqueado";
+
+export const esBloqueo = (mensaje: BaseMessage | undefined): boolean => mensaje !== undefined && isAIMessage(mensaje) && mensaje.additional_kwargs[CLAVE_BLOQUEO] === true;
+
 export function aMensajesLlm(mensajes: readonly BaseMessage[]): MensajeLlm[] {
-  return mensajes.flatMap((mensaje): MensajeLlm[] => {
-    if (isHumanMessage(mensaje)) return [{ rol: "usuario", texto: textoDe(mensaje.content) }];
+  return mensajes.flatMap((mensaje, indice): MensajeLlm[] => {
+    if (esBloqueo(mensaje)) return [];
+    if (isHumanMessage(mensaje)) return esBloqueo(mensajes[indice + 1]) ? [] : [{ rol: "usuario", texto: textoDe(mensaje.content) }];
     if (isToolMessage(mensaje)) return [{ rol: "herramienta", id: mensaje.tool_call_id, nombre: mensaje.name ?? "", resultado: textoDe(mensaje.content) }];
     if (!isAIMessage(mensaje)) return [];
     const firmas = firmasDe(mensaje);

@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { crearClasificador } from "./agent/guardrails/scope-classifier.ts";
 import { AgenteContratos } from "./agent/loop.ts";
 import { SesionesEnArchivo } from "./agent/sessions.ts";
 import { crearApp } from "./http/app.ts";
@@ -16,6 +17,7 @@ function iniciar(config: Configuracion): void {
   const sesiones = new SesionesEnArchivo(config.directorio);
   const agente = new AgenteContratos({
     proveedor,
+    clasificador: crearClasificador(config.proveedor, proveedor),
     sesiones,
     directorio: config.directorio,
     limites: { maxIteraciones: config.maxIteraciones, maxTokensSesion: config.maxTokensSesion, maxTokensProceso: config.maxTokensProceso },

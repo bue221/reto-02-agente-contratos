@@ -1,8 +1,11 @@
 import type { LlamadaVisible, RespuestaChat } from "../http/types.ts";
 import { mensajeDeError } from "../core/domain/result.ts";
-import { type DefinicionHerramienta, type MensajeLlm, type ProveedorLlm, type RespuestaLlm, totalTokens } from "../llm/adapter.ts";
+import { type DefinicionHerramienta, type MensajeLlm, type ProveedorLlm, type RespuestaLlm, type UsoTokens, totalTokens } from "../llm/adapter.ts";
 import type { ContextoHerramienta } from "../tools/tool.ts";
 import { ejecutarLlamada } from "./execution.ts";
+import { auditarBloqueo } from "./guardrails/audit.ts";
+import { type ClasificadorDeAlcance, respuestaDeBloqueo, revisarEntrada } from "./guardrails/input-guard.ts";
+import { conCanario, nuevoCanario, revisarSalida } from "./guardrails/output-guard.ts";
 import { definicionesParaModelo } from "./model-tools.ts";
 import { leerPromptSistema } from "./prompt.ts";
 import { type AlmacenSesiones, CerrojoPorSesion, type Sesion, nuevaSesion } from "./sessions.ts";
@@ -32,6 +35,8 @@ export interface DependenciasCiclo {
   cargarSistema?: () => Promise<string>;
   /** Fecha de registro fija para tests deterministas. */
   hoy?: string;
+  /** Clasificador de alcance de la guarda de entrada; sin él solo rigen las reglas deterministas. */
+  clasificador?: ClasificadorDeAlcance | undefined;
 }
 
 /** Estado de un turno en curso: lo que el chat mostrará y lo que decide la confirmación (CA3). */
@@ -49,6 +54,7 @@ export class AgenteContratos {
   readonly #deps: DependenciasCiclo;
   readonly #definiciones: DefinicionHerramienta[] = definicionesParaModelo();
   readonly #cerrojo = new CerrojoPorSesion();
+  readonly #canario = nuevoCanario();
   #tokensProceso = 0;
 
   constructor(deps: DependenciasCiclo) {
@@ -67,14 +73,30 @@ export class AgenteContratos {
   async #turno(sessionId: string, mensaje: string): Promise<RespuestaChat> {
     const sesion = (await this.#deps.sesiones.obtener(sessionId)) ?? nuevaSesion(sessionId);
     sesion.pendientesConfirmacion = await pendientesVigentes(this.#deps.directorio, sesion.pendientesConfirmacion);
-    const turno = this.#iniciarTurno(sesion, mensaje);
-    const texto = await this.#resolver(turno).catch((error: unknown) => `Ocurrió un error interno: ${mensajeDeError(error)}. Puedes volver a intentarlo.`);
-    const respuesta = this.#cerrarTurno(turno, texto);
+    const respuesta = (await this.#respuestaBloqueada(sesion, mensaje)) ?? (await this.#atender(sesion, mensaje));
     sesion.turnos.push({ ts: new Date().toISOString(), usuario: mensaje, respuesta });
     sesion.actualizada = new Date().toISOString();
     await this.#deps.sesiones.guardar(sesion);
     console.info(`[agente] sesión ${sessionId}: ${respuesta.toolCalls.length} llamadas, confirmación=${respuesta.needsConfirmation}, tokens=${totalTokens(sesion.tokens)}`);
     return respuesta;
+  }
+
+  /** Un mensaje bloqueado no entra al historial del modelo: queda solo en los turnos visibles y en el log. */
+  async #respuestaBloqueada(sesion: Sesion, mensaje: string): Promise<RespuestaChat | null> {
+    // Con el tope alcanzado el ciclo responde sin llamar al modelo; tampoco se gasta en el clasificador.
+    if (this.#topeDeTokens(sesion)) return null;
+    const ultimaRespuesta = sesion.turnos.at(-1)?.respuesta.reply ?? "";
+    const { bloqueo, uso } = await revisarEntrada(mensaje, { clasificador: this.#deps.clasificador, ultimaRespuesta });
+    this.#contarTokens(sesion, uso);
+    if (!bloqueo) return null;
+    await auditarBloqueo(this.#deps.directorio, sesion.id, "guarda_entrada", `${bloqueo.motivo}: ${bloqueo.detalle}`);
+    return { reply: respuestaDeBloqueo(bloqueo, sesion.pendientesConfirmacion), toolCalls: [], needsConfirmation: false };
+  }
+
+  async #atender(sesion: Sesion, mensaje: string): Promise<RespuestaChat> {
+    const turno = this.#iniciarTurno(sesion, mensaje);
+    const texto = await this.#resolver(turno).catch((error: unknown) => `Ocurrió un error interno: ${mensajeDeError(error)}. Puedes volver a intentarlo.`);
+    return this.#cerrarTurno(turno, texto);
   }
 
   #iniciarTurno(sesion: Sesion, mensaje: string): Turno {
@@ -90,7 +112,13 @@ export class AgenteContratos {
   }
 
   async #resolver(turno: Turno): Promise<string> {
-    const sistema = await (this.#deps.cargarSistema ?? (() => leerPromptSistema(this.#deps.directorio)))();
+    const sistema = conCanario(await (this.#deps.cargarSistema ?? (() => leerPromptSistema(this.#deps.directorio)))(), this.#canario);
+    const salida = revisarSalida(await this.#iterar(turno, sistema), this.#canario);
+    if (salida.filtrada) await auditarBloqueo(this.#deps.directorio, turno.sesion.id, "guarda_salida", "la respuesta contenía el canario del prompt de sistema");
+    return salida.texto;
+  }
+
+  async #iterar(turno: Turno, sistema: string): Promise<string> {
     const { maxIteraciones } = this.#deps.limites;
     let ultimoTexto = "";
     for (let iteracion = 0; iteracion < maxIteraciones; iteracion++) {
@@ -98,7 +126,7 @@ export class AgenteContratos {
       if (tope) return tope;
       const respuesta = await this.#deps.proveedor.enviar([{ rol: "sistema", texto: sistema }, ...turno.sesion.mensajes], this.#definiciones);
       if (!respuesta.ok) return errorDeProveedor(this.#deps.proveedor, respuesta.error);
-      this.#contarTokens(turno.sesion, respuesta.data);
+      this.#contarTokens(turno.sesion, respuesta.data.uso);
       if (respuesta.data.llamadas.length === 0) return respuesta.data.texto.trim() || "(el modelo no devolvió texto)";
       ultimoTexto = respuesta.data.texto.trim() || ultimoTexto;
       await this.#ejecutarLlamadas(turno, respuesta.data);
@@ -126,10 +154,10 @@ export class AgenteContratos {
     return null;
   }
 
-  #contarTokens(sesion: Sesion, respuesta: RespuestaLlm): void {
-    sesion.tokens.entrada += respuesta.uso.entrada;
-    sesion.tokens.salida += respuesta.uso.salida;
-    this.#tokensProceso += totalTokens(respuesta.uso);
+  #contarTokens(sesion: Sesion, uso: UsoTokens): void {
+    sesion.tokens.entrada += uso.entrada;
+    sesion.tokens.salida += uso.salida;
+    this.#tokensProceso += totalTokens(uso);
   }
 
   #cerrarTurno(turno: Turno, texto: string): RespuestaChat {

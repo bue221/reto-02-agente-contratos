@@ -16,7 +16,7 @@ Requisito: Bun ≥ 1.2. Usa siempre `bun` (no npm, pnpm, yarn ni node).
 |---|---|
 | `bun install` | Instala dependencias de los workspaces `api/` y `web/` (un solo `bun.lock` en la raíz). |
 | `bun run dev` | Script `dev` de cada workspace: API con recarga en `:3000` + front Vite en `:5173` (proxy de `/api`). |
-| `bun run test` | 112 pruebas: `api/tests/` (`unit/` e `integration/`) y `studio/tests/`. No necesitan clave. `bun test` desde la raíz también sirve. |
+| `bun run test` | 148 pruebas: `api/tests/` (`unit/` e `integration/`) y `studio/tests/`. No necesitan clave. `bun test` desde la raíz también sirve. |
 | `bun run typecheck` | `tsc --noEmit` de `api/`, `web/` y `studio/`. |
 | `bun run demo` | `demo.ts`: procesa el buzón llamando directo a las herramientas, sin modelo. |
 | `bun run sync:module` | Regenera `modulo/agent.md` y `modulo/skill/…/SKILL.md`. `--check` falla si están desactualizados. |
@@ -35,7 +35,7 @@ api/                                backend (workspace): package.json, tsconfig.
 │   ├── server.ts, config.ts        arranque y variables de entorno (zod)
 │   ├── knowledge/                  conocimiento del proceso (se anexa al prompt)
 │   ├── tools/                      recepcion_* que ve el modelo (recepcion.ts), contratos_* del PRD (contratos.ts), envoltorio común (tool.ts)
-│   ├── agent/                      ciclo ReAct de la recepcionista, guarda de confirmación, sesiones, prompt, empaquetado del módulo
+│   ├── agent/                      ciclo ReAct de la recepcionista, guarda de confirmación, guardrails/ (alcance y manipulación), sesiones, prompt, empaquetado del módulo
 │   ├── llm/                        interfaz ProveedorLlm (adapter.ts), Gemini, offline, fábrica
 │   ├── http/                       Hono: chat (app.ts), buzón/bandeja/reinicio (hitl.ts), helpers.ts, tipos compartidos con el front (types.ts)
 │   ├── application/use-cases/      casos de uso: validar, registrar, alertas, estado y vistas del buzón, reinicio
@@ -98,6 +98,7 @@ Prompt y conocimiento se leen en cada turno: cambiarlos no requiere reiniciar el
 8. **Las herramientas no ejecutan shell** ni escriben fuera de `out/`.
 9. **Chat y bandeja comparten la misma verdad** (`out/analisis.json` + `out/procesados.json`) y la misma reanudación (`approval-tray.ts`). No guardes estado de revisión en otro lugar.
 10. **`modulo/` se genera**: edita `agent/prompt.md` o el conocimiento y ejecuta `bun run sync:module`.
+11. **El alcance se impone en el servidor, no solo en el prompt**: todo mensaje pasa por `revisarEntrada` (`api/src/agent/guardrails/`) antes del modelo, y toda respuesta por `revisarSalida`, en la app y en Studio. El clasificador falla cerrado y lo bloqueado no entra al historial del modelo. No dejes un camino al modelo que se salte las guardas.
 
 ## Recetas rápidas
 
