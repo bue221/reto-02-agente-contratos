@@ -96,7 +96,7 @@ function BarraLateral({ tab, onTab, contadores, salud, aprobador, onAprobador, r
 }
 
 export function App() {
-  const [tab, setTab] = useState<Tab>("buzon");
+  const [tab, setTab] = useState<Tab>("chat");
   const [sessionId, setSessionId] = useState(sesionGuardada);
   const [buzon, setBuzon] = useState<RespuestaBuzon | null>(null);
   const [bandeja, setBandeja] = useState<RespuestaBandeja>(BANDEJA_VACIA);
