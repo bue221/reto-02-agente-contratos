@@ -2,17 +2,42 @@ import { z } from "zod";
 import { type Resultado, exito, fallo, mensajeDeError } from "../core/domain/result.ts";
 import type { DefinicionHerramienta, LlamadaHerramienta, MensajeLlm, ProveedorLlm, RespuestaLlm } from "./adapter.ts";
 
-/** Adaptador Gemini vía REST (`generateContent`) con `fetch`: sin SDK, con timeout por AbortController. */
+/** Adaptador Gemini vía REST (`generateContent`) con `fetch`: sin SDK, con timeout por AbortController y reintentos ante fallos transitorios. */
 
 export interface OpcionesGemini {
   apiKey: string;
   modelo: string;
   timeoutMs: number;
+  /** Reintentos ante 429, 5xx o fallo de red (no ante timeout); 0 los desactiva. */
+  reintentos?: number;
   /** Inyectable para tests; por defecto el `fetch` global. */
   fetch?: (url: string, init: RequestInit) => Promise<Response>;
+  /** Inyectable para tests; por defecto un `setTimeout`. */
+  esperar?: (ms: number) => Promise<void>;
 }
 
 const URL_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const ESPERA_BASE_MS = 1000;
+const ESPERA_MAXIMA_MS = 10_000;
+const ESTADOS_TRANSITORIOS = new Set([429, 500, 502, 503, 504]);
+
+const dormir = (ms: number): Promise<void> => new Promise((resolver) => setTimeout(resolver, ms));
+
+/** Un intento de llamada: si falló, si vale la pena repetirlo y cuánto pidió esperar el servidor. */
+interface Intento {
+  resultado: Resultado<RespuestaLlm>;
+  reintentable: boolean;
+  esperaPedidaMs?: number;
+}
+
+/** `Retry-After` en segundos; la forma de fecha HTTP no la usa Gemini. */
+function esperaPedida(respuesta: Response): number | undefined {
+  const segundos = Number(respuesta.headers.get("retry-after"));
+  return Number.isFinite(segundos) && segundos > 0 ? segundos * 1000 : undefined;
+}
+
+/** Espera exponencial (1 s, 2 s, 4 s…) salvo que el servidor pida otra; siempre acotada para no colgar el turno. */
+const esperaAntesDe = (reintento: number, pedida: number | undefined): number => Math.min(pedida ?? ESPERA_BASE_MS * 2 ** reintento, ESPERA_MAXIMA_MS);
 
 type Parte =
   | { text: string }
@@ -159,6 +184,20 @@ export class ProveedorGemini implements ProveedorLlm {
   }
 
   async enviar(mensajes: readonly MensajeLlm[], herramientas: readonly DefinicionHerramienta[]): Promise<Resultado<RespuestaLlm>> {
+    const { reintentos = 0, esperar = dormir } = this.#opciones;
+    const cuerpo = JSON.stringify(cuerpoDePeticion(mensajes, herramientas));
+    for (let reintento = 0; ; reintento++) {
+      const { resultado, reintentable, esperaPedidaMs } = await this.#intentar(cuerpo);
+      if (resultado.ok) return resultado;
+      if (!reintentable || reintento >= reintentos) return reintento > 0 ? fallo(`${resultado.error} (tras ${reintento + 1} intentos)`) : resultado;
+      const espera = esperaAntesDe(reintento, esperaPedidaMs);
+      console.warn(`[gemini] ${resultado.error}; reintento ${reintento + 1}/${reintentos} en ${espera} ms`);
+      await esperar(espera);
+    }
+  }
+
+  /** Un timeout no se reintenta: ya consumió `timeoutMs` y repetirlo multiplicaría la espera de la analista. */
+  async #intentar(cuerpo: string): Promise<Intento> {
     const { apiKey, timeoutMs } = this.#opciones;
     const hacerFetch = this.#opciones.fetch ?? fetch;
     const controlador = new AbortController();
@@ -168,14 +207,17 @@ export class ProveedorGemini implements ProveedorLlm {
         method: "POST",
         // La clave va en cabecera, nunca en la URL, para que no aparezca en logs de proxies ni en errores.
         headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
-        body: JSON.stringify(cuerpoDePeticion(mensajes, herramientas)),
+        body: cuerpo,
         signal: controlador.signal,
       });
-      if (!respuesta.ok) return fallo(await errorHttp(respuesta));
-      return respuestaDe(await respuesta.json());
+      if (!respuesta.ok) {
+        const espera = esperaPedida(respuesta);
+        return { resultado: fallo(await errorHttp(respuesta)), reintentable: ESTADOS_TRANSITORIOS.has(respuesta.status), ...(espera ? { esperaPedidaMs: espera } : {}) };
+      }
+      return { resultado: respuestaDe(await respuesta.json()), reintentable: false };
     } catch (error) {
-      if (controlador.signal.aborted) return fallo(`Gemini no respondió en ${timeoutMs} ms (tiempo de espera agotado)`);
-      return fallo(`no se pudo contactar a Gemini: ${mensajeDeError(error)}`);
+      if (controlador.signal.aborted) return { resultado: fallo(`Gemini no respondió en ${timeoutMs} ms (tiempo de espera agotado)`), reintentable: false };
+      return { resultado: fallo(`no se pudo contactar a Gemini: ${mensajeDeError(error)}`), reintentable: true };
     } finally {
       clearTimeout(temporizador);
     }

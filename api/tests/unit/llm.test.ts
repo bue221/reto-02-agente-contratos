@@ -99,6 +99,72 @@ describe("adaptador Gemini", () => {
   });
 });
 
+describe("reintentos del adaptador Gemini", () => {
+  const RESPUESTA_OK = { candidates: [{ content: { parts: [{ text: "listo" }] } }] };
+
+  /** Responde en orden lo que diga la secuencia y anota cada espera sin dormir de verdad. */
+  function conSecuencia(respuestas: ((init: RequestInit) => Response | Promise<Response>)[], reintentos = 2) {
+    const esperas: number[] = [];
+    let llamadas = 0;
+    const proveedor = new ProveedorGemini({
+      apiKey: CLAVE,
+      modelo: "gemini-2.5-flash",
+      timeoutMs: 30,
+      reintentos,
+      fetch: async (_url, init) => {
+        const siguiente = respuestas[Math.min(llamadas, respuestas.length - 1)];
+        llamadas += 1;
+        if (!siguiente) throw new Error("secuencia vacía");
+        return siguiente(init);
+      },
+      esperar: async (ms) => {
+        esperas.push(ms);
+      },
+    });
+    return { proveedor, esperas, llamadas: () => llamadas };
+  }
+
+  test("un 503 seguido de éxito se reintenta con espera exponencial", async () => {
+    const caso = conSecuencia([
+      () => Response.json({ error: { message: "overloaded" } }, { status: 503 }),
+      () => Response.json({ error: { message: "overloaded" } }, { status: 503 }),
+      () => Response.json(RESPUESTA_OK),
+    ]);
+    const respuesta = await caso.proveedor.enviar(CONVERSACION, []);
+    expect(respuesta).toMatchObject({ ok: true, data: { texto: "listo" } });
+    expect(caso.llamadas()).toBe(3);
+    expect(caso.esperas).toEqual([1000, 2000]);
+  });
+
+  test("respeta Retry-After acotado y reintenta un fallo de red", async () => {
+    const caso = conSecuencia([
+      () => Response.json({ error: { message: "quota" } }, { status: 429, headers: { "retry-after": "60" } }),
+      () => Promise.reject(new TypeError("fetch failed")),
+      () => Response.json(RESPUESTA_OK),
+    ]);
+    expect((await caso.proveedor.enviar(CONVERSACION, [])).ok).toBe(true);
+    expect(caso.esperas).toEqual([10_000, 2000]);
+  });
+
+  test("al agotar los reintentos devuelve el último error con el número de intentos", async () => {
+    const caso = conSecuencia([() => Response.json({ error: { message: "overloaded" } }, { status: 503 })]);
+    expect(await caso.proveedor.enviar(CONVERSACION, [])).toEqual({ ok: false, error: "Gemini respondió HTTP 503: overloaded (tras 3 intentos)" });
+    expect(caso.llamadas()).toBe(3);
+  });
+
+  test("un error que no es transitorio (400) o un timeout no se reintentan", async () => {
+    const invalido = conSecuencia([() => Response.json({ error: { message: "API key not valid" } }, { status: 400 })]);
+    expect(await invalido.proveedor.enviar(CONVERSACION, [])).toEqual({ ok: false, error: "Gemini respondió HTTP 400: API key not valid" });
+    expect(invalido.llamadas()).toBe(1);
+
+    const colgado = conSecuencia([
+      (init) => new Promise<Response>((_resolver, rechazar) => init.signal?.addEventListener("abort", () => rechazar(new DOMException("aborted", "AbortError")))),
+    ]);
+    expect(await colgado.proveedor.enviar(CONVERSACION, [])).toEqual({ ok: false, error: "Gemini no respondió en 30 ms (tiempo de espera agotado)" });
+    expect(colgado.llamadas()).toBe(1);
+  });
+});
+
 describe("selección de proveedor por entorno", () => {
   test("auto usa offline sin clave y Gemini con clave", () => {
     expect(crearProveedor(leerConfiguracion({})).nombre).toBe("offline");

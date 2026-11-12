@@ -14,6 +14,7 @@ const EntornoSchema = z.object({
   GOOGLE_API_KEY: textoOpcional,
   GEMINI_MODEL: z.string().min(1).default("gemini-2.5-flash"),
   LLM_TIMEOUT_MS: entero(60_000),
+  LLM_REINTENTOS: z.coerce.number().int().min(0).max(5).default(2),
   MAX_ITERACIONES: entero(25),
   MAX_TOKENS_SESION: entero(300_000),
   MAX_TOKENS_PROCESO: entero(3_000_000),
@@ -26,6 +27,8 @@ export interface Configuracion {
   googleApiKey: string | undefined;
   modeloGemini: string;
   timeoutMs: number;
+  /** Reintentos ante fallos transitorios del proveedor (429, 5xx, red). */
+  reintentosLlm: number;
   maxIteraciones: number;
   maxTokensSesion: number;
   maxTokensProceso: number;
@@ -53,6 +56,7 @@ export function leerConfiguracion(entorno: Record<string, string | undefined> = 
     googleApiKey: e.GOOGLE_API_KEY,
     modeloGemini: e.GEMINI_MODEL,
     timeoutMs: e.LLM_TIMEOUT_MS,
+    reintentosLlm: e.LLM_REINTENTOS,
     maxIteraciones: e.MAX_ITERACIONES,
     maxTokensSesion: e.MAX_TOKENS_SESION,
     maxTokensProceso: e.MAX_TOKENS_PROCESO,
