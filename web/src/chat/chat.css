@@ -1,0 +1,430 @@
+:root {
+  --fondo: #0d1117;
+  --superficie: #161b22;
+  --superficie-2: #1f2630;
+  --borde: #30363d;
+  --texto: #e6edf3;
+  --tenue: #8b949e;
+  --acento: #4f8cff;
+  --ok: #3fb950;
+  --error: #f85149;
+  --aviso: #d29922;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--texto);
+  background: var(--fondo);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+code,
+pre {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.85em;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 0;
+  border-radius: 8px;
+  padding: 0.55rem 1rem;
+  background: var(--acento);
+  color: white;
+  font-weight: 600;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.secundario {
+  background: var(--superficie-2);
+  color: var(--texto);
+  border: 1px solid var(--borde);
+}
+
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.cabecera {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--borde);
+  background: var(--superficie);
+}
+
+.cabecera h1 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.cabecera-acciones {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.ayuda {
+  margin: 0.15rem 0 0;
+  color: var(--tenue);
+  font-size: 0.8rem;
+}
+
+.proveedor {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--borde);
+  color: var(--tenue);
+}
+
+.proveedor.gemini {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.proveedor.offline {
+  color: var(--aviso);
+  border-color: var(--aviso);
+}
+
+.cuerpo {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  min-height: 0;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.mensajes {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.burbuja {
+  max-width: 900px;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.burbuja.usuario {
+  align-self: flex-end;
+  background: var(--acento);
+  color: white;
+}
+
+.burbuja.agente {
+  align-self: flex-start;
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  white-space: normal;
+}
+
+.burbuja.pide-confirmacion {
+  border: 2px solid var(--aviso);
+  box-shadow: 0 0 0 4px rgb(210 153 34 / 0.15);
+}
+
+.marca-confirmacion {
+  display: inline-block;
+  margin-bottom: 0.5rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  background: var(--aviso);
+  color: #111;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.burbuja.error {
+  align-self: stretch;
+  border: 1px solid var(--error);
+  color: var(--error);
+  background: rgb(248 81 73 / 0.08);
+}
+
+.llamadas {
+  align-self: flex-start;
+  width: min(900px, 100%);
+  font-size: 0.85rem;
+  color: var(--tenue);
+}
+
+.llamadas > summary {
+  cursor: pointer;
+  margin-bottom: 0.35rem;
+}
+
+.llamada {
+  border: 1px solid var(--borde);
+  border-left: 3px solid var(--ok);
+  border-radius: 6px;
+  margin: 0.25rem 0;
+  background: var(--superficie);
+}
+
+.llamada.error {
+  border-left-color: var(--error);
+}
+
+.llamada summary {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.llamada .nombre {
+  color: var(--texto);
+}
+
+.llamada .resumen {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llamada pre {
+  margin: 0;
+  padding: 0.6rem;
+  max-height: 280px;
+  overflow: auto;
+  border-top: 1px solid var(--borde);
+  color: var(--texto);
+}
+
+.estado,
+.etiqueta {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--borde);
+  white-space: nowrap;
+}
+
+.estado.ok {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.estado.error {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.etiqueta.confirmado {
+  color: var(--aviso);
+  border-color: var(--aviso);
+}
+
+.pensando {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--tenue);
+  font-size: 0.9rem;
+}
+
+.punto {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--acento);
+  animation: latido 1s infinite ease-in-out;
+}
+
+.punto:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.punto:nth-child(3) {
+  animation-delay: 0.3s;
+  margin-right: 0.4rem;
+}
+
+@keyframes latido {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.vacio {
+  margin: auto;
+  max-width: 640px;
+  text-align: center;
+  color: var(--tenue);
+}
+
+.sugerencia {
+  background: var(--superficie);
+  border: 1px dashed var(--acento);
+  color: var(--texto);
+  font-weight: 400;
+  text-align: left;
+  line-height: 1.5;
+}
+
+.banner-confirmacion {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 0 1.25rem;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--aviso);
+  background: rgb(210 153 34 / 0.12);
+}
+
+.banner-confirmacion button {
+  margin-left: auto;
+  background: var(--aviso);
+  color: #111;
+}
+
+.entrada {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+}
+
+.entrada textarea {
+  flex: 1;
+  resize: none;
+  font: inherit;
+  color: var(--texto);
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+}
+
+.md p,
+.md ul,
+.md h4 {
+  margin: 0.4rem 0;
+}
+
+.md h4 {
+  font-size: 0.95rem;
+}
+
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--borde);
+}
+
+.md-tabla {
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+
+.md table {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.md th,
+.md td {
+  border: 1px solid var(--borde);
+  padding: 0.35rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.md th {
+  background: var(--superficie-2);
+}
+
+.panel {
+  border-left: 1px solid var(--borde);
+  background: var(--superficie);
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.maestro {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.maestro li {
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.fila-titulo {
+  display: flex;
+  justify-content: space-between;
+}
+
+.fila-cliente {
+  margin-top: 0.2rem;
+}
+
+.fila-detalle {
+  color: var(--tenue);
+}
+
+.poliza {
+  font-size: 0.7rem;
+  color: var(--tenue);
+}
+
+.poliza.pendiente,
+.poliza.vencida {
+  color: var(--aviso);
+}
+
+.error-texto {
+  color: var(--error);
+}
+
+@media (max-width: 900px) {
+  .cuerpo {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    display: none;
+  }
+}

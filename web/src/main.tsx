@@ -1,10 +1,13 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "./App";
-import "./styles.css";
+import { ChatApp } from "./chat/ChatApp";
+import "./chat/chat.css";
 
-createRoot(document.getElementById("root")!).render(
+const raiz = document.getElementById("root");
+if (!raiz) throw new Error("falta el elemento #root en index.html");
+
+createRoot(raiz).render(
   <StrictMode>
-    <App />
+    <ChatApp />
   </StrictMode>,
 );
