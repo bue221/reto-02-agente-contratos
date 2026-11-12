@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { archivosDelModulo } from "../../src/agent/module-bundle.ts";
-import { leerPiezas } from "../../src/agent/prompt.ts";
+import { leerPiezas, leerPromptSistema } from "../../src/agent/prompt.ts";
 import { UMBRAL_CONFIANZA } from "../../src/core/domain/parameters.ts";
 import * as herramientasApp from "../../src/tools/contratos.ts";
 import * as herramientasModulo from "../../../modulo/tools/contratos.ts";
@@ -32,5 +32,11 @@ describe("módulo reutilizable (PRD 9.4)", () => {
   test("el conocimiento cita el mismo umbral de confianza que el código", async () => {
     const { conocimiento } = await leerPiezas(RAIZ);
     expect(conocimiento).toContain(`confianza < ${UMBRAL_CONFIANZA}`);
+  });
+
+  test("el prompt de sistema trae la fecha de hoy para que el agente no tenga que preguntarla", async () => {
+    const sistema = await leerPromptSistema(RAIZ, "2026-11-12");
+    expect(sistema).toContain("Fecha de hoy: 2026-11-12.");
+    expect(sistema.indexOf("Fecha de hoy")).toBeLessThan(sistema.indexOf("\n\n---\n\n"));
   });
 });

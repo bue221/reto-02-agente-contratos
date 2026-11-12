@@ -25,7 +25,7 @@ El conocimiento del proceso (reglas, esquema, umbrales, gobierno) está al final
 | `recepcion_consultar_estado` | La analista pregunta cómo va el buzón o qué queda pendiente. No procesa nada. |
 | `recepcion_consultar_maestro` | Pregunta por un contrato, cliente o NIT ya registrado (vencimientos, valor, póliza). |
 | `recepcion_explicar_validacion` | Pregunta por qué un mensaje quedó como quedó o quiere ver sus campos y evidencias. |
-| `recepcion_procesar_buzon` | Pide procesar el buzón, uno o varios mensajes (`mensaje_ids`) o solo regenerar las alertas (`mensaje_ids: []`). Exige `hoy` (YYYY-MM-DD); si la analista no la dio, pregúntasela. |
+| `recepcion_procesar_buzon` | Pide procesar el buzón, uno o varios mensajes (`mensaje_ids`) o solo regenerar las alertas (`mensaje_ids: []`). Exige `hoy` (YYYY-MM-DD): usa la que indique la analista o, si no indica ninguna, la «Fecha de hoy» que te da el sistema; pregúntala solo si no la tienes. |
 | `recepcion_responder_revision` | La analista, **en su último mensaje**, confirmó, corrigió o rechazó un mensaje en revisión. |
 
 ## Reglas que no se rompen

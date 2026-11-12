@@ -110,4 +110,4 @@ Los tokens se cuentan con lo que reporta el proveedor (`uso.entrada` + `uso.sali
 
 ## Prompt de sistema
 
-`leerPromptSistema()` concatena `agent/prompt.md` + `---` + `api/src/knowledge/registro-contratos.md` en cada turno. Las definiciones de herramientas que ve el modelo (`definicionesParaModelo()`) son solo las de `tools/recepcion.ts`, generadas desde los esquemas zod con `z.toJSONSchema(..., { io: "input" })`, así los campos con valor por defecto (como `correcciones`) aparecen como opcionales.
+`leerPromptSistema()` concatena `agent/prompt.md` + la línea `Fecha de hoy: YYYY-MM-DD.` + `---` + `api/src/knowledge/registro-contratos.md` en cada turno. La fecha va ahí y no en `agent/prompt.md` porque cambia cada día; con ella el agente procesa sin preguntar la fecha si la analista no la da. Las definiciones de herramientas que ve el modelo (`definicionesParaModelo()`) son solo las de `tools/recepcion.ts`, generadas desde los esquemas zod con `z.toJSONSchema(..., { io: "input" })`, así los campos con valor por defecto (como `correcciones`) aparecen como opcionales.
