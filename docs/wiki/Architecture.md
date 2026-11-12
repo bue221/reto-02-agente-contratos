@@ -39,7 +39,7 @@ flowchart TB
   Infra --> Core
   Infra --> FS[(fixtures/ · out/)]
 
-  subgraph Studio["studio/ · solo desarrollo · LangGraph.js"]
+  subgraph Studio["studio/ · LangGraph.js · publicado en /langgraph"]
     GR[grafo recepcionista]
     GM[grafo motor]
   end

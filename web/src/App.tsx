@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type CorreccionesVisibles, type FilaMaestroVisible, type RespuestaBandeja, type RespuestaBuzon, type Salud, api, obtenerSalud } from "./lib/api";
+import { type CorreccionesVisibles, type FilaMaestroVisible, type RespuestaBandeja, type RespuestaBuzon, type Salud, URL_STUDIO, api, obtenerSalud } from "./lib/api";
 import { ChatView } from "./views/ChatView";
 import { mensajeDeFalla } from "./lib/format";
 import { ApprovalTrayView } from "./views/ApprovalTrayView";
@@ -81,6 +81,17 @@ function BarraLateral({ tab, onTab, contadores, salud, aprobador, onAprobador, r
           <span className={`status-dot ${salud ? salud.provider : "off"}`} />
           {salud ? `LLM · ${salud.provider} (${salud.model})` : "backend sin conexión"}
         </span>
+        {salud?.studio ? (
+          <a
+            className="button ghost"
+            href={URL_STUDIO}
+            target="_blank"
+            rel="noreferrer"
+            title="Los grafos recepcionista y motor en LangGraph Studio, sobre el mismo buzón. Pide iniciar sesión en LangSmith (la cuenta gratuita basta)."
+          >
+            Abrir en LangGraph Studio
+          </a>
+        ) : null}
         <label className="approver-field">
           <span>Aprobador</span>
           <input className="approver" value={aprobador} onChange={(evento) => onAprobador(evento.target.value)} placeholder="Tu nombre" maxLength={80} />

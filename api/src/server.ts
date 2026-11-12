@@ -22,9 +22,17 @@ function iniciar(config: Configuracion): void {
     directorio: config.directorio,
     limites: { maxIteraciones: config.maxIteraciones, maxTokensSesion: config.maxTokensSesion, maxTokensProceso: config.maxTokensProceso },
   });
-  const app = crearApp({ agente, sesiones, directorio: config.directorio, webDist: join(config.directorio, "web", "dist"), origenesCors: config.origenesCors });
+  const app = crearApp({
+    agente,
+    sesiones,
+    directorio: config.directorio,
+    webDist: join(config.directorio, "web", "dist"),
+    origenesCors: config.origenesCors,
+    urlLangGraph: config.urlLangGraph,
+  });
   const servidor = Bun.serve({ port: config.puerto, fetch: app.fetch, idleTimeout: IDLE_TIMEOUT_SEGUNDOS });
   console.info(`[server] http://localhost:${servidor.port} · proveedor ${proveedor.nombre} (${proveedor.modelo}) · tope ${config.maxIteraciones} iteraciones/turno`);
+  if (config.urlLangGraph) console.info(`[server] LangGraph Studio publicado en /langgraph → ${config.urlLangGraph}`);
 }
 
 try {

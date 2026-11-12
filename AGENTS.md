@@ -16,18 +16,18 @@ Requisito: Bun ≥ 1.2. Usa siempre `bun` (no npm, pnpm, yarn ni node).
 |---|---|
 | `bun install` | Instala dependencias de los workspaces `api/` y `web/` (un solo `bun.lock` en la raíz). |
 | `bun run dev` | Script `dev` de cada workspace: API con recarga en `:3000` + front Vite en `:5173` (proxy de `/api`). |
-| `bun run test` | 162 pruebas: `api/tests/` (`unit/` e `integration/`) y `studio/tests/`. No necesitan clave. `bun test` desde la raíz también sirve. |
+| `bun run test` | 168 pruebas: `api/tests/` (`unit/` e `integration/`) y `studio/tests/`. No necesitan clave. `bun test` desde la raíz también sirve. |
 | `bun run typecheck` | `tsc --noEmit` de `api/`, `web/` y `studio/`. |
 | `bun run demo` | `demo.ts`: procesa el buzón llamando directo a las herramientas, sin modelo. **Borra `out/`** (el estado que comparten la app y Studio) y lo deja todo procesado. |
 | `bun run sync:module` | Regenera `modulo/agent.md` y `modulo/skill/…/SKILL.md`. `--check` falla si están desactualizados. |
-| `bun run studio` | Servidor de LangGraph en `:2024` con los grafos `recepcionista`, `motor` y `reiniciar_demo` para LangGraph Studio ([wiki](docs/wiki/Studio.md)). Solo desarrollo. |
+| `bun run studio` | Servidor de LangGraph en `:2024` con los grafos `recepcionista`, `motor` y `reiniciar_demo` para LangGraph Studio ([wiki](docs/wiki/Studio.md)). La imagen Docker lo levanta también y la API lo publica en `/langgraph` (botón «Abrir en LangGraph Studio» de la web). |
 | `bun run build` / `bun run start` | Compila el front y sirve API + front en un solo proceso. |
 
 Sin `GOOGLE_API_KEY` el backend usa el proveedor `offline`. Para forzarlo: `LLM_PROVIDER=offline`.
 
 ## Mapa del repositorio
 
-Monorepo con tres workspaces de Bun: `api/`, `web/` y `studio/` (solo desarrollo).
+Monorepo con tres workspaces de Bun: `api/`, `web/` y `studio/` (grafos para LangGraph Studio; la app no depende de él).
 
 ```
 api/                                backend (workspace): package.json, tsconfig.json
@@ -37,7 +37,7 @@ api/                                backend (workspace): package.json, tsconfig.
 │   ├── tools/                      recepcion_* que ve el modelo (recepcion.ts), contratos_* del PRD (contratos.ts), envoltorio común (tool.ts)
 │   ├── agent/                      ciclo ReAct de la recepcionista, guarda de confirmación, guardrails/ (alcance y manipulación), sesiones, prompt, empaquetado del módulo
 │   ├── llm/                        interfaz ProveedorLlm (adapter.ts), Gemini, offline, fábrica
-│   ├── http/                       Hono: chat (app.ts), buzón/bandeja/reinicio (hitl.ts), helpers.ts, tipos compartidos con el front (types.ts)
+│   ├── http/                       Hono: chat (app.ts), buzón/bandeja/reinicio (hitl.ts), /langgraph para Studio (langgraph-proxy.ts), helpers.ts, tipos compartidos con el front (types.ts)
 │   ├── application/use-cases/      casos de uso: validar, registrar, alertas, estado y vistas del buzón, reinicio
 │   ├── application/workflows/      motor determinista: grafo por mensaje, pasada del buzón, reanudación tras la revisión
 │   ├── core/domain/                tipos y esquemas del contrato y del maestro, fechas, texto, parámetros, Resultado
@@ -47,7 +47,7 @@ api/                                backend (workspace): package.json, tsconfig.
 ├── tests/                          helpers.ts, unit/, integration/
 └── scripts/sync-module.ts          genera modulo/
 web/                                front (workspace): src/App.tsx, views/, components/, lib/ (api.ts, format.ts), styles/
-studio/                             solo desarrollo (workspace): los dos grafos en LangGraph.js para Studio, sobre las mismas piezas de api/
+studio/                             workspace: los dos grafos en LangGraph.js para Studio, sobre las mismas piezas de api/ (y los mismos topes)
 agent/prompt.md                     comportamiento del agente (system prompt)
 modulo/                             bonus PRD 9.4: el agente empaquetado para otras plataformas (generado, no editar a mano)
 fixtures/reto-02/                   buzón, maestro y comerciales de entrada (SOLO LECTURA)
@@ -55,6 +55,7 @@ out/                                salidas en ejecución (ignorado por git)
 docs/                               PRD.md y wiki/
 demo.ts                             verificación sin modelo
 package.json, bun.lock              workspaces y scripts que delegan
+Dockerfile, docker-entrypoint.sh    imagen única: API + front y, con LANGGRAPH_URL, el servidor de LangGraph de studio/ en 127.0.0.1
 ```
 
 La **raíz del proyecto** (`ctx.directory`, `config.directorio`) es la carpeta del repositorio, no `api/`: desde ahí se resuelven `fixtures/`, `out/`, `agent/` y `web/dist`.

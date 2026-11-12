@@ -193,6 +193,7 @@ Determinista sobre `contrato.txt` (`api/src/core/extraction/`), sin modelo:
 | Front, API, adaptador, prompt aparte | Hecho | `web/`, `api/src/http/`, `api/src/llm/`, `agent/prompt.md`. |
 | Arranque en un comando | Hecho | `bun run dev` (≈ segundos tras `bun install`). |
 | Link público | Hecho | Front en Vercel (<https://reto02-contratos.vercel.app>) y backend en AWS Lightsail; flujo de la sección 11 del PRD probado contra el link con Gemini. |
+| LangGraph Studio desde la web | Hecho | La imagen levanta el servidor de LangGraph de `studio/` junto a la API, que lo publica en `/langgraph`; botón **Abrir en LangGraph Studio** en el front. Mismo `out/` que la app y mismos topes de iteraciones y tokens. Tests del proxy y de los topes en Studio. |
 | Bonus `modulo/` | Hecho | Generado desde las mismas piezas + test de sincronía. |
 
 ## 10. Uso de IA

@@ -6,7 +6,8 @@ Código: `api/src/http/app.ts` (chat, salud, sesiones, maestro), `api/src/http/h
 
 | Método | Ruta | Cuerpo | Respuesta |
 |---|---|---|---|
-| `GET` | `/api/health` | — | `{ ok: true, provider, model }` (sin claves) |
+| `GET` | `/api/health` | — | `{ ok: true, provider, model, studio }` (sin claves); `studio`: `/langgraph` está publicado |
+| `*` | `/langgraph/*` | lo que pida Studio | Con `LANGGRAPH_URL`: reenvío transparente al servidor de LangGraph de `studio/` (método, ruta sin el prefijo, consulta, cuerpo y streams SSE). Su CORS lo pone ese servidor (cualquier origen). `502 langgraph_no_disponible` si no responde |
 | `POST` | `/api/chat` | `{ sessionId, message }` | `{ reply, toolCalls: [{ nombre, args, ok, resumen }], needsConfirmation }` |
 | `POST` | `/api/chat/stream` | `{ sessionId, message }` | `text/event-stream`: el mismo turno con sus eventos en vivo (ver abajo) |
 | `GET` | `/api/sessions/:id` | — | Sesión completa: `turnos[]`, `mensajes[]`, `tokens`, `pendientesConfirmacion[]` |
@@ -89,7 +90,7 @@ curl -s -X POST localhost:3000/api/demo/reset
 
 ## CORS
 
-Si `CORS_ORIGINS` tiene valores, `/api/*` solo autoriza esos orígenes. Vacío: solo mismo origen (local con proxy de Vite o imagen única).
+Si `CORS_ORIGINS` tiene valores, `/api/*` solo autoriza esos orígenes (no aplica a `/langgraph/*`). Vacío: solo mismo origen (local con proxy de Vite o imagen única).
 
 ## Agregar un endpoint
 

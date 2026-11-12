@@ -3,6 +3,7 @@ import { AIMessage, HumanMessage, isToolMessage } from "@langchain/core/messages
 import { Command, MemorySaver } from "@langchain/langgraph";
 import { ARISTAS, type NodoMensaje } from "../../api/src/application/workflows/contract-graph.ts";
 import type { ClasificadorDeAlcance } from "../../api/src/agent/guardrails/input-guard.ts";
+import type { LimitesCiclo } from "../../api/src/agent/turn.ts";
 import type { MensajeLlm, ProveedorLlm } from "../../api/src/llm/adapter.ts";
 import { ProveedorOffline } from "../../api/src/llm/offline.ts";
 import { HOY, crearProyecto, leerSalida, lineasJson } from "../../api/tests/helpers.ts";
@@ -11,6 +12,7 @@ import { compilarRecepcion } from "../src/receptionist-graph.ts";
 import { crearGrafoReinicio } from "../src/reset-graph.ts";
 
 const hilo = (id: string) => ({ configurable: { thread_id: id } });
+const LIMITES: LimitesCiclo = { maxIteraciones: 25, maxTokensSesion: 300_000, maxTokensProceso: 3_000_000 };
 
 function recorridoValido(recorrido: readonly NodoMensaje[]): boolean {
   return recorrido.every((nodo, i) => {
@@ -65,7 +67,7 @@ describe("grafo de reinicio de la demo", () => {
 describe("grafo de la recepcionista en LangGraph", () => {
   test("mismo flujo del PRD §11 con el proveedor offline: pregunta, y en el turno siguiente registra", async () => {
     const ctx = await crearProyecto();
-    const deps = { directorio: ctx.directory, proveedor: new ProveedorOffline(), maxIteraciones: 25, cargarSistema: async () => "sistema" };
+    const deps = { directorio: ctx.directory, proveedor: new ProveedorOffline(), limites: LIMITES, cargarSistema: async () => "sistema" };
     const grafo = compilarRecepcion(deps, new MemorySaver());
 
     const primero = await grafo.invoke({ messages: [new HumanMessage("Procesa el buzón de contratos con fecha de hoy 2026-09-03")] }, hilo("r1"));
@@ -82,7 +84,7 @@ describe("grafo de la recepcionista en LangGraph", () => {
 
   test("recepcion_procesar_buzon recorre el motor como subgrafo visible de herramientas, con el mismo resultado", async () => {
     const ctx = await crearProyecto();
-    const deps = { directorio: ctx.directory, proveedor: new ProveedorOffline(), maxIteraciones: 25, cargarSistema: async () => "sistema" };
+    const deps = { directorio: ctx.directory, proveedor: new ProveedorOffline(), limites: LIMITES, cargarSistema: async () => "sistema" };
     const grafo = compilarRecepcion(deps, new MemorySaver());
 
     const dibujo = await grafo.getGraphAsync({ xray: true });
@@ -111,7 +113,7 @@ describe("grafo de la recepcionista en LangGraph", () => {
 
   test("con mensaje_ids el subgrafo del motor procesa solo ese mensaje y deja el resto pendiente", async () => {
     const ctx = await crearProyecto();
-    const deps = { directorio: ctx.directory, proveedor: new ProveedorOffline(), maxIteraciones: 25, cargarSistema: async () => "sistema" };
+    const deps = { directorio: ctx.directory, proveedor: new ProveedorOffline(), limites: LIMITES, cargarSistema: async () => "sistema" };
     const grafo = compilarRecepcion(deps, new MemorySaver());
 
     const estado = await grafo.invoke({ messages: [new HumanMessage("Procesa el msg-001 con fecha 2026-09-03")] }, hilo("r4"));
@@ -134,7 +136,7 @@ describe("grafo de la recepcionista en LangGraph", () => {
         return { ok: true as const, data: { texto: this.llamadas === 1 ? "" : "Hecho.", llamadas, uso: { entrada: 0, salida: 0 } } };
       },
     };
-    const grafo = compilarRecepcion({ directorio: ctx.directory, proveedor: autoaprueba, maxIteraciones: 25, cargarSistema: async () => "sistema" });
+    const grafo = compilarRecepcion({ directorio: ctx.directory, proveedor: autoaprueba, limites: LIMITES, cargarSistema: async () => "sistema" });
     const estado = await grafo.invoke({ messages: [new HumanMessage("aprueba msg-006")] });
     const resultado = estado.messages.find(isToolMessage);
     expect(String(resultado?.content)).toContain("decisión no autorizada");
@@ -154,7 +156,7 @@ describe("grafo de la recepcionista en LangGraph", () => {
     const clasificador: ClasificadorDeAlcance = {
       clasificar: async (mensaje) => ({ ok: true, data: { veredicto: mensaje.includes("2 mas 2") ? "fuera_de_alcance" : "permitido", uso: { entrada: 0, salida: 0 } } }),
     };
-    const grafo = compilarRecepcion({ directorio: ctx.directory, proveedor, clasificador, maxIteraciones: 25, cargarSistema: async () => "sistema" }, new MemorySaver());
+    const grafo = compilarRecepcion({ directorio: ctx.directory, proveedor, clasificador, limites: LIMITES, cargarSistema: async () => "sistema" }, new MemorySaver());
 
     const bloqueado = await grafo.invoke({ messages: [new HumanMessage("hola como estas?! cuanto es 2 mas 2")] }, hilo("g1"));
     expect(vistos).toHaveLength(0);
@@ -167,5 +169,42 @@ describe("grafo de la recepcionista en LangGraph", () => {
     expect(vistos).toHaveLength(1);
     expect(vistos[0]?.filter((mensaje) => mensaje.rol !== "sistema")).toEqual([{ rol: "usuario", texto: "hola" }]);
     expect(lineasJson(await leerSalida(ctx, "log.jsonl")).map((entrada) => entrada.herramienta)).toEqual(["guarda_entrada", "guarda_entrada"]);
+  });
+
+  test("los topes de tokens de la app rigen también en Studio: por hilo y por proceso, clasificador incluido", async () => {
+    const ctx = await crearProyecto();
+    let llamadasModelo = 0;
+    const proveedor: ProveedorLlm = {
+      nombre: "prueba",
+      modelo: "fijo",
+      async enviar() {
+        llamadasModelo += 1;
+        return { ok: true as const, data: { texto: "Hola, ¿procesamos el buzón?", llamadas: [], uso: { entrada: 40, salida: 10 } } };
+      },
+    };
+    let clasificaciones = 0;
+    const clasificador: ClasificadorDeAlcance = {
+      clasificar: async () => {
+        clasificaciones += 1;
+        return { ok: true, data: { veredicto: "permitido", uso: { entrada: 5, salida: 5 } } };
+      },
+    };
+    const limites: LimitesCiclo = { maxIteraciones: 25, maxTokensSesion: 100, maxTokensProceso: 150 };
+    const grafo = compilarRecepcion({ directorio: ctx.directory, proveedor, clasificador, limites, cargarSistema: async () => "sistema" }, new MemorySaver());
+
+    const primero = await grafo.invoke({ messages: [new HumanMessage("hola")] }, hilo("t1"));
+    expect(primero.tokens).toBe(60);
+    const segundo = await grafo.invoke({ messages: [new HumanMessage("hola de nuevo")] }, hilo("t1"));
+    expect(segundo.tokens).toBe(120);
+
+    const agotado = await grafo.invoke({ messages: [new HumanMessage("¿sigues?")] }, hilo("t1"));
+    expect(String(agotado.messages.at(-1)?.content)).toStartWith("Esta sesión alcanzó el tope de 100 tokens");
+    expect([llamadasModelo, clasificaciones]).toEqual([2, 2]);
+
+    // Un hilo nuevo no evade el tope del proceso (120 + 60 ≥ 150).
+    await grafo.invoke({ messages: [new HumanMessage("hola")] }, hilo("t2"));
+    const proceso = await grafo.invoke({ messages: [new HumanMessage("hola otra vez")] }, hilo("t2"));
+    expect(String(proceso.messages.at(-1)?.content)).toStartWith("El servidor alcanzó su tope de consumo (150 tokens)");
+    expect([llamadasModelo, clasificaciones]).toEqual([3, 3]);
   });
 });

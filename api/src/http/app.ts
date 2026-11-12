@@ -13,6 +13,7 @@ import { rutasDelProyecto } from "../infrastructure/paths.ts";
 import { mensajeDeError } from "../core/domain/result.ts";
 import { type DependenciasHitl, rutasHitl } from "./hitl.ts";
 import { errorApi, leerCuerpo } from "./helpers.ts";
+import { rutasLangGraph } from "./langgraph-proxy.ts";
 import type { EventoChat, PeticionChat, RespuestaChat, RespuestaMaestro, Salud } from "./types.ts";
 
 /** API HTTP (PRD 6.4): chat, buzón y bandeja. Sin estado propio: delega en el agente, los casos de uso y el almacén. */
@@ -24,6 +25,8 @@ export interface DependenciasApi {
   /** Carpeta del front compilado; si no existe, solo se expone la API. */
   webDist?: string;
   origenesCors?: string[];
+  /** Servidor de LangGraph de `studio/` que se publica en `/langgraph/*`; sin él, Studio no se expone. */
+  urlLangGraph?: string | undefined;
   /** Coordina el acceso a `out/` entre turnos, bandeja y reinicio; por defecto uno por app. */
   acceso?: AccesoOut;
   /** Fecha de registro fija para tests deterministas. */
@@ -40,7 +43,7 @@ const PeticionChatSchema = z.object({
 }) satisfies z.ZodType<PeticionChat>;
 
 function rutasDelChat(app: Hono, deps: DependenciasApi, acceso: AccesoOut): void {
-  app.get("/api/health", (c) => c.json<Salud>({ ok: true, provider: deps.agente.proveedor.nombre, model: deps.agente.proveedor.modelo }));
+  app.get("/api/health", (c) => c.json<Salud>({ ok: true, provider: deps.agente.proveedor.nombre, model: deps.agente.proveedor.modelo, studio: Boolean(deps.urlLangGraph) }));
 
   app.post("/api/chat", async (c) => {
     const peticion = await leerCuerpo(c, PeticionChatSchema);
@@ -103,6 +106,7 @@ export function crearApp(deps: DependenciasApi): Hono {
   const hitl: DependenciasHitl = { directorio: deps.directorio, sesiones: deps.sesiones, acceso, ...(deps.hoy ? { hoy: deps.hoy } : {}) };
   rutasHitl(app, hitl);
   app.all("/api/*", (c) => c.json(errorApi("ruta_no_encontrada", `${c.req.method} ${c.req.path} no existe`), 404));
+  if (deps.urlLangGraph) rutasLangGraph(app, deps.urlLangGraph);
   if (deps.webDist) frontEstatico(app, deps.webDist);
   return app;
 }

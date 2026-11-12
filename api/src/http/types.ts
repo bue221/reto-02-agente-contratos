@@ -53,6 +53,8 @@ export interface Salud {
   ok: true;
   provider: string;
   model: string;
+  /** El backend publica el servidor de LangGraph en `/langgraph` para abrirlo en LangGraph Studio. */
+  studio: boolean;
 }
 
 export interface ErrorApi {

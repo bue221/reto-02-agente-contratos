@@ -8,9 +8,10 @@ import { respuestaDeBloqueo, revisarEntrada } from "../../api/src/agent/guardrai
 import { conCanario, nuevoCanario, revisarSalida } from "../../api/src/agent/guardrails/output-guard.ts";
 import { definicionesParaModelo } from "../../api/src/agent/model-tools.ts";
 import { leerPromptSistema } from "../../api/src/agent/prompt.ts";
-import { cerrarPendientes, conPreguntaExplicita, errorDeProveedor, mensajeDeTope, pendientesVigentes } from "../../api/src/agent/turn.ts";
+import { cerrarPendientes, conPreguntaExplicita, errorDeProveedor, mensajeDeTope, mensajeDeTopeDeTokens, pendientesVigentes } from "../../api/src/agent/turn.ts";
 import type { ContextoMotor } from "../../api/src/application/workflows/process-mailbox.ts";
 import type { LlamadaVisible } from "../../api/src/http/types.ts";
+import { type UsoTokens, totalTokens } from "../../api/src/llm/adapter.ts";
 import { compilarPasada, pasadaComoSubgrafo } from "./engine-graph.ts";
 import { CLAVE_BLOQUEO, CLAVE_FIRMAS, aMensajesLlm, esBloqueo, firmasDeLlamadas, textoDe } from "./messages.ts";
 import { type DependenciasStudio, dependenciasPorEntorno } from "./project.ts";
@@ -39,6 +40,7 @@ export const EstadoRecepcion = MessagesZodState.extend({
   en_revision: Ids().describe("Lo que el motor pausó en este turno"),
   resueltos: Ids().describe("Lo que una decisión humana cerró en este turno"),
   iteraciones: z.number().int().nonnegative().default(0).describe("Llamadas al modelo en este turno (tope CA1)"),
+  tokens: z.number().int().nonnegative().default(0).describe("Tokens consumidos en este hilo, clasificador incluido (tope MAX_TOKENS_SESION)"),
 });
 
 type Estado = z.infer<typeof EstadoRecepcion>;
@@ -64,19 +66,28 @@ export function crearGrafoRecepcion(deps: DependenciasStudio) {
   const canario = nuevoCanario();
   const cargarSistema = deps.cargarSistema ?? (() => leerPromptSistema(deps.directorio));
   const ctxDe = (hilo: string) => ({ directory: deps.directorio, sessionId: `studio-${hilo}` });
+  // Por proceso, como `AgenteContratos`: abrir hilos nuevos no evade el tope. La app lleva su propia cuenta.
+  let tokensProceso = 0;
+  const topeDeTokens = (estado: Estado): string | null => mensajeDeTopeDeTokens(estado.tokens, tokensProceso, deps.limites);
+  const contar = (estado: Estado, uso: UsoTokens): number => {
+    tokensProceso += totalTokens(uso);
+    return estado.tokens + totalTokens(uso);
+  };
 
   /** Antes que el modelo: lo bloqueado recibe una respuesta fija y el turno termina sin llamarlo. */
   async function guardaEntrada(crudo: z.input<typeof EstadoRecepcion>, config: LangGraphRunnableConfig): Promise<Actualizacion> {
     const estado = leerEstado(crudo);
     const ultimo = ultimoMensaje(estado.messages);
-    if (!ultimo || !isHumanMessage(ultimo)) return {};
+    // Con el tope alcanzado tampoco se gasta en el clasificador: `recepcionista` responde con el aviso.
+    if (!ultimo || !isHumanMessage(ultimo) || topeDeTokens(estado)) return {};
     const anterior = estado.messages.slice(0, -1).findLast((mensaje) => isAIMessage(mensaje) && (mensaje.tool_calls?.length ?? 0) === 0);
-    const { bloqueo } = await revisarEntrada(textoDe(ultimo.content), { clasificador: deps.clasificador, ultimaRespuesta: anterior ? textoDe(anterior.content) : "" });
-    if (!bloqueo) return {};
+    const { bloqueo, uso } = await revisarEntrada(textoDe(ultimo.content), { clasificador: deps.clasificador, ultimaRespuesta: anterior ? textoDe(anterior.content) : "" });
+    const tokens = contar(estado, uso);
+    if (!bloqueo) return { tokens };
     await auditarBloqueo(deps.directorio, ctxDe(hiloDe(config)).sessionId, "guarda_entrada", `${bloqueo.motivo}: ${bloqueo.detalle}`);
     const pendientes = await pendientesVigentes(deps.directorio, estado.pendientes);
     const respuesta = new AIMessage({ content: respuestaDeBloqueo(bloqueo, pendientes), additional_kwargs: { [CLAVE_BLOQUEO]: true, necesita_confirmacion: false } });
-    return { pendientes, messages: [respuesta] };
+    return { pendientes, tokens, messages: [respuesta] };
   }
 
   /** Al empezar un turno se descartan los pendientes cerrados en otro canal y se reinician los contadores. */
@@ -110,18 +121,22 @@ export function crearGrafoRecepcion(deps: DependenciasStudio) {
     const estado = leerEstado(crudo);
     const hilo = hiloDe(config);
     const turno = await turnoEnCurso(estado);
-    if (turno.iteraciones >= deps.maxIteraciones) return responder(turno, mensajeDeTope(deps.maxIteraciones, llamadasDelTurno(estado.messages), ""), hilo);
+    const { maxIteraciones } = deps.limites;
+    if (turno.iteraciones >= maxIteraciones) return responder(turno, mensajeDeTope(maxIteraciones, llamadasDelTurno(estado.messages), ""), hilo);
+    const tope = topeDeTokens(estado);
+    if (tope) return responder(turno, tope, hilo);
     const sistema = conCanario(await cargarSistema(), canario);
     const respuesta = await deps.proveedor.enviar([{ rol: "sistema", texto: sistema }, ...aMensajesLlm(estado.messages)], definiciones);
     if (!respuesta.ok) return responder(turno, errorDeProveedor(deps.proveedor, respuesta.error), hilo);
-    const { texto, llamadas } = respuesta.data;
-    if (llamadas.length === 0) return responder(turno, await conRespaldo(estado.messages, sistema, texto.trim() || "(el modelo no devolvió texto)", hilo), hilo);
+    const { texto, llamadas, uso } = respuesta.data;
+    const tokens = contar(estado, uso);
+    if (llamadas.length === 0) return { ...(await responder(turno, await conRespaldo(estado.messages, sistema, texto.trim() || "(el modelo no devolvió texto)", hilo), hilo)), tokens };
     const pide = new AIMessage({
       content: texto,
       tool_calls: llamadas.map((llamada) => ({ id: llamada.id, name: llamada.nombre, args: llamada.args, type: "tool_call" as const })),
       additional_kwargs: { [CLAVE_FIRMAS]: firmasDeLlamadas(llamadas) },
     });
-    return { ...turno, iteraciones: turno.iteraciones + 1, messages: [pide] };
+    return { ...turno, iteraciones: turno.iteraciones + 1, tokens, messages: [pide] };
   }
 
   async function herramientas(crudo: z.input<typeof EstadoRecepcion>, config: LangGraphRunnableConfig): Promise<Actualizacion> {
@@ -165,6 +180,6 @@ export function crearGrafoRecepcion(deps: DependenciasStudio) {
 export const compilarRecepcion = (deps: DependenciasStudio, checkpointer?: BaseCheckpointSaver) =>
   crearGrafoRecepcion(deps)
     .compile(checkpointer ? { checkpointer } : {})
-    .withConfig({ recursionLimit: 2 * deps.maxIteraciones + 5 });
+    .withConfig({ recursionLimit: 2 * deps.limites.maxIteraciones + 5 });
 
 export const graph = compilarRecepcion(dependenciasPorEntorno());

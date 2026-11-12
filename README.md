@@ -70,20 +70,25 @@ Todas opcionales; ver [`.env.example`](.env.example). La clave solo vive en el b
 | `PORT` | `3000` | Puerto del backend. |
 | `CORS_ORIGINS` | vacío | Orígenes del front desplegado aparte, separados por coma. Vacío: solo mismo origen. |
 | `VITE_API_URL` | vacío | Solo en el build del front: URL pública del backend. Vacío: mismo origen. |
+| `LANGGRAPH_URL` | vacío (en la imagen, `http://127.0.0.1:2024`) | Servidor de LangGraph de `studio/` que la API publica en `/langgraph` y que habilita el botón **Abrir en LangGraph Studio**. Vacío: no se publica. |
 
 ## Ver los grafos en LangGraph Studio
 
+**Desde la web**: el botón **Abrir en LangGraph Studio** de la barra lateral abre Studio (smith.langchain.com, pide iniciar sesión en LangSmith; la cuenta gratuita basta) conectado al backend desplegado. La imagen levanta el servidor de LangGraph junto a la API y esta lo publica en `/langgraph`, así que Studio trabaja sobre el mismo `out/` que la app: lo que registren ahí aparece en el Buzón, la Bandeja y el Maestro.
+
+**En local**:
+
 ```bash
-bun run studio                   # servidor de LangGraph en :2024 con los grafos "recepcionista" y "motor"
+bun run studio                   # servidor de LangGraph en :2024 con los grafos "recepcionista", "motor" y "reiniciar_demo"
 ```
 
-Abre <https://smith.langchain.com/studio?baseUrl=http://localhost:2024>. Es solo para desarrollo: los grafos de `studio/` llaman a las mismas herramientas, prompt, proveedor y guarda CA3 que la app, y escriben en el mismo `out/`. El grafo `motor` se detiene en `revision_humana` (interrupt) hasta que respondas `{ "decision": "aprobar", "correcciones": { … } }` o `{ "decision": "rechazar", "motivo": "…" }`. Detalle en la [wiki](docs/wiki/Studio.md).
+Abre <https://smith.langchain.com/studio?baseUrl=http://localhost:2024> (o pon `LANGGRAPH_URL=http://127.0.0.1:2024` en `.env` para ver el botón en `bun run dev`). Los grafos de `studio/` llaman a las mismas herramientas, prompt, proveedor, topes de tokens y guarda CA3 que la app, y escriben en el mismo `out/`. El grafo `motor` se detiene en `revision_humana` (interrupt) hasta que respondas `{ "decision": "aprobar", "correcciones": { … } }` o `{ "decision": "rechazar", "motivo": "…" }`. Detalle en la [wiki](docs/wiki/Studio.md).
 
 ## Verificación sin modelo
 
 ```bash
 bun install && bun run demo.ts   # procesa los 6 mensajes llamando directo a las herramientas
-bun run test                     # 162 pruebas: api/tests (extracción, reglas, herramientas, motor, ciclo, guardas, HTTP, bandeja, reinicio, módulo) y studio/tests
+bun run test                     # 168 pruebas: api/tests (extracción, reglas, herramientas, motor, ciclo, guardas, HTTP, bandeja, reinicio, módulo) y studio/tests
 bun run typecheck                # api + web + studio
 ```
 
@@ -96,7 +101,8 @@ bun run typecheck                # api + web + studio
 | `POST` | `/api/chat` | `{ sessionId, message }` → `{ reply, toolCalls: [{ nombre, args, ok, resumen, pasos? }], needsConfirmation }`; `toolCalls` son las `recepcion_*` del modelo y `pasos`, las `contratos_*` que ejecutó el motor por debajo |
 | `POST` | `/api/chat/stream` | Mismo cuerpo y mismo turno, como `text/event-stream`: eventos `modelo`, `herramienta`, `paso` (cada `contratos_*` del motor), `resultado` y por último `fin` con la misma respuesta de `/api/chat`. Lo usa el chat para mostrar el progreso en vivo |
 | `GET` | `/api/sessions/:id` | Sesión completa: `turnos[]` visibles, `mensajes[]` del modelo, `tokens`, `pendientesConfirmacion[]` |
-| `GET` | `/api/health` | `{ ok: true, provider, model }` (sin claves) |
+| `GET` | `/api/health` | `{ ok: true, provider, model, studio }` (sin claves); `studio` indica si `/langgraph` está publicado |
+| `*` | `/langgraph/*` | Con `LANGGRAPH_URL`: reenvío transparente al servidor de LangGraph de `studio/` (API de LangGraph, la que usa Studio como `baseUrl`). `502 langgraph_no_disponible` si no responde |
 | `GET` | `/api/maestro` | `{ filas[] }` del maestro de trabajo (`out/sharepoint/maestro-contratos.csv`) |
 | `GET` | `/api/maestro.csv` | Descarga del CSV del maestro de trabajo |
 | `GET` | `/api/buzon` | `{ contadores: { total, pendientes, requiere_revision, procesados }, mensajes[], errores[] }`; cada mensaje con `estado` (`pendiente`, `requiere_revision`, `registrado`, `actualizado`, `duplicado`, `rechazado`), `clasificacion`, `id_contrato` y `decidido_por` |
@@ -111,7 +117,7 @@ Errores tipados: `{ ok: false, error: { codigo, mensaje } }` con `400 peticion_i
 
 ## Estructura
 
-Monorepo con tres workspaces de Bun: `api/` (backend), `web/` (front) y `studio/` (solo desarrollo: los grafos para LangGraph Studio).
+Monorepo con tres workspaces de Bun: `api/` (backend), `web/` (front) y `studio/` (los grafos para LangGraph Studio; la app no depende de ellos).
 
 ```
 api/                                 backend Bun + Hono (workspace)
@@ -123,7 +129,7 @@ api/                                 backend Bun + Hono (workspace)
 │   ├── tools/                       recepcion_* que ve el modelo (recepcion.ts), contratos_* del PRD (contratos.ts) y envoltorio común (tool.ts)
 │   ├── agent/                       ciclo ReAct de la recepcionista, guardas (confirmación, alcance, manipulación, respaldo de datos), sesiones, prompt
 │   ├── llm/                         adaptador (adapter.ts), Gemini, offline y fábrica
-│   ├── http/                        rutas Hono (chat en app.ts, buzón/bandeja/reinicio en hitl.ts) y tipos compartidos con el front
+│   ├── http/                        rutas Hono (chat en app.ts, buzón/bandeja/reinicio en hitl.ts, /langgraph en langgraph-proxy.ts) y tipos compartidos con el front
 │   ├── application/use-cases/       validar, registrar, alertas, estado de mensajes, vistas del buzón, línea de tiempo, reinicio
 │   ├── application/workflows/       motor determinista: grafo por mensaje, pasada del buzón y reanudación tras la revisión humana
 │   ├── core/                        núcleo puro, sin E/S: domain/, extraction/, rules/
@@ -131,14 +137,15 @@ api/                                 backend Bun + Hono (workspace)
 ├── tests/                           unit/ (extracción, LLM) e integration/ (herramientas, agente, HTTP, bandeja, módulo)
 └── scripts/sync-module.ts           genera modulo/ desde agent/ y el conocimiento
 web/                                 front React + Vite (workspace): src/views, components, lib, styles
-studio/                              solo desarrollo (workspace): los dos grafos en LangGraph.js para LangGraph Studio
+studio/                              workspace: los dos grafos en LangGraph.js para LangGraph Studio (local o publicados por la imagen)
 agent/prompt.md                      comportamiento del agente (system prompt), compartido por la API y modulo/
 modulo/                              bonus PRD 9.4: el mismo agente empaquetado para otras plataformas (ver abajo)
 fixtures/reto-02/                    buzón, maestro y comerciales de entrada (solo lectura)
 docs/                                PRD del reto y wiki técnica (docs/wiki/Home.md)
 demo.ts                              verificación sin modelo
 package.json, bun.lock               workspaces y scripts que delegan en api/ y web/
-Dockerfile, docker-compose.yml, render.yaml   imagen única (API + front) y despliegues
+Dockerfile, docker-entrypoint.sh     imagen única (API + front + servidor de LangGraph) y su arranque
+docker-compose.yml, render.yaml      despliegues
 ```
 
 Desde la raíz, `bun run dev`, `bun run test`, `bun run typecheck`, `bun run demo` y `bun run sync:module` delegan en los workspaces; también puedes ejecutarlos dentro de `api/` o `web/`.
@@ -151,7 +158,7 @@ La documentación técnica completa está en la [wiki](docs/wiki/Home.md); las i
 
 ## Despliegue
 
-La imagen [`Dockerfile`](Dockerfile) compila el front y ejecuta `bun run start` (API + front en el mismo puerto).
+La imagen [`Dockerfile`](Dockerfile) compila el front y arranca con [`docker-entrypoint.sh`](docker-entrypoint.sh): `bun run start` (API + front en el mismo puerto) y, como `LANGGRAPH_URL` viene definido, el servidor de LangGraph de `studio/` bajo Node 22, escuchando solo en `127.0.0.1:2024`; la API lo publica en `/langgraph`. Para no levantarlo, pasa `-e LANGGRAPH_URL=`. Con el servidor de LangGraph la imagen usa unos 250–310 MB de RAM en reposo.
 
 ```bash
 docker build -t agente-contratos .
@@ -166,6 +173,8 @@ docker run -p 3000:3000 -e GOOGLE_API_KEY=... agente-contratos
 | Backend (imagen del `Dockerfile`) | AWS Lightsail Containers `reto02-contratos` (nano, 1 nodo, `us-east-1`) | Puerto 3000, health check `/api/health`; variables `LLM_PROVIDER=gemini`, `GOOGLE_API_KEY`, `GEMINI_MODEL`, `CORS_ORIGINS=https://reto02-contratos.vercel.app`. |
 
 La clave de Gemini solo existe como variable de entorno del contenedor en Lightsail: no está en el repositorio, en la imagen ni en el front.
+
+Studio queda en `https://<servicio>.cs.amazonlightsail.com/langgraph` sin autenticación, como el resto de la demo. Corre con los mismos topes de iteraciones y de tokens (por hilo y por proceso) que la app, pero cada proceso lleva su propia cuenta: el consumo máximo del contenedor es el doble de `MAX_TOKENS_PROCESO`.
 
 Backend (requiere AWS CLI y `lightsailctl`):
 

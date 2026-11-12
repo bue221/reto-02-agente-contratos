@@ -72,6 +72,7 @@ api/src/
 ├── http/
 │   ├── app.ts                 crearApp: health, chat (JSON y SSE), sesiones, maestro, CORS, front estático, 404/500
 │   ├── hitl.ts                buzón, bandeja, descarga CSV y reinicio de la demo
+│   ├── langgraph-proxy.ts     /langgraph/* → servidor de LangGraph de studio/ (con LANGGRAPH_URL)
 │   ├── helpers.ts             errores tipados, leerCuerpo (zod), responder (código → HTTP)
 │   └── types.ts               tipos compartidos con el front
 ├── application/
@@ -170,17 +171,17 @@ api/tests/
     └── module.test.ts         sincronía de modulo/ (4)
 ```
 
-## `studio/` (solo desarrollo)
+## `studio/` (LangGraph Studio)
 
 ```
 studio/
-├── package.json, tsconfig.json   LangGraph.js y su CLI como devDependencies; scripts studio, test, typecheck
+├── package.json, tsconfig.json   LangGraph.js y su CLI como dependencias (la imagen los instala); scripts studio, test, typecheck
 ├── langgraph.json                grafos recepcionista y motor; carga ../.env
 ├── src/
 │   ├── receptionist-graph.ts     __start__ → guarda_entrada → recepcionista ⇄ herramientas → __end__
 │   ├── engine-graph.ts           ingestar → por mensaje NODOS de contract-graph.ts → alertas → revision_humana (interrupt)
 │   ├── messages.ts               mensajes de LangChain ↔ MensajeLlm
-│   └── project.ts                dependencias por entorno (raíz, proveedor, tope de iteraciones)
+│   └── project.ts                dependencias por entorno (raíz, proveedor, topes de iteraciones y tokens)
 └── tests/graphs.test.ts          ambos grafos sobre un proyecto temporal (4)
 ```
 

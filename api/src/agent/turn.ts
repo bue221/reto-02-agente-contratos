@@ -9,6 +9,24 @@ import type { ProveedorLlm } from "../llm/adapter.ts";
  * las usan el ciclo propio (`loop.ts`) y el grafo de LangGraph de `studio/`.
  */
 
+export interface LimitesCiclo {
+  /** CA1: llamadas al modelo por turno. */
+  maxIteraciones: number;
+  /** Costo: tokens acumulados por sesión (o por hilo, en Studio). */
+  maxTokensSesion: number;
+  /** Costo: tokens acumulados por el proceso, para que abrir sesiones nuevas no evada el tope. */
+  maxTokensProceso: number;
+}
+
+/** Con un tope de costo alcanzado el turno responde con este texto sin llamar al modelo ni al clasificador. */
+export function mensajeDeTopeDeTokens(usadosSesion: number, usadosProceso: number, limites: LimitesCiclo): string | null {
+  if (usadosSesion >= limites.maxTokensSesion) {
+    return `Esta sesión alcanzó el tope de ${limites.maxTokensSesion} tokens. Abre una sesión nueva para continuar; lo ya registrado queda en out/.`;
+  }
+  if (usadosProceso >= limites.maxTokensProceso) return `El servidor alcanzó su tope de consumo (${limites.maxTokensProceso} tokens). Intenta más tarde.`;
+  return null;
+}
+
 /** Un mensaje resuelto en otro canal (bandeja u otra sesión) deja de esperar confirmación. */
 export async function pendientesVigentes(directorio: string, pendientes: readonly string[]): Promise<string[]> {
   if (pendientes.length === 0) return [];

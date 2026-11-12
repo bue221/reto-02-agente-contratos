@@ -10,22 +10,15 @@ import { conCanario, nuevoCanario, revisarSalida } from "./guardrails/output-gua
 import { definicionesParaModelo } from "./model-tools.ts";
 import { leerPromptSistema } from "./prompt.ts";
 import { type AlmacenSesiones, CerrojoPorSesion, type Sesion, nuevaSesion } from "./sessions.ts";
-import { cerrarPendientes, conPreguntaExplicita, errorDeProveedor, mensajeDeTope, pendientesVigentes } from "./turn.ts";
+import { type LimitesCiclo, cerrarPendientes, conPreguntaExplicita, errorDeProveedor, mensajeDeTope, mensajeDeTopeDeTokens, pendientesVigentes } from "./turn.ts";
+
+export type { LimitesCiclo } from "./turn.ts";
 
 /**
  * Ciclo ReAct de la recepcionista (PRD 6.3): prompt → modelo → herramientas `recepcion_*` → modelo … hasta
  * una respuesta de texto. El modelo decide cuándo consultar o encender el motor; el camino de cada contrato
  * lo fija el motor determinista. Solo conoce `ProveedorLlm`: cambiar de proveedor no toca este archivo.
  */
-
-export interface LimitesCiclo {
-  /** CA1: llamadas al modelo por turno. */
-  maxIteraciones: number;
-  /** Costo: tokens acumulados por sesión. */
-  maxTokensSesion: number;
-  /** Costo: tokens acumulados por el proceso, para que abrir sesiones nuevas no evada el tope. */
-  maxTokensProceso: number;
-}
 
 export interface DependenciasCiclo {
   proveedor: ProveedorLlm;
@@ -175,12 +168,7 @@ export class AgenteContratos {
   }
 
   #topeDeTokens(sesion: Sesion): string | null {
-    const { maxTokensSesion, maxTokensProceso } = this.#deps.limites;
-    if (totalTokens(sesion.tokens) >= maxTokensSesion) {
-      return `Esta sesión alcanzó el tope de ${maxTokensSesion} tokens. Abre una sesión nueva para continuar; lo ya registrado queda en out/.`;
-    }
-    if (this.#tokensProceso >= maxTokensProceso) return `El servidor alcanzó su tope de consumo (${maxTokensProceso} tokens). Intenta más tarde.`;
-    return null;
+    return mensajeDeTopeDeTokens(totalTokens(sesion.tokens), this.#tokensProceso, this.#deps.limites);
   }
 
   #contarTokens(sesion: Sesion, uso: UsoTokens): void {

@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Hono } from "hono";
 import { AgenteContratos } from "../../src/agent/loop.ts";
 import { SesionesEnArchivo } from "../../src/agent/sessions.ts";
@@ -22,7 +22,7 @@ async function appDePrueba(entorno: Record<string, string> = {}): Promise<Hono> 
     cargarSistema: async () => "sistema",
     hoy: HOY,
   });
-  return crearApp({ agente, sesiones, directorio: ctx.directory, origenesCors: config.origenesCors });
+  return crearApp({ agente, sesiones, directorio: ctx.directory, origenesCors: config.origenesCors, urlLangGraph: config.urlLangGraph });
 }
 
 const postChat = (app: Hono, cuerpo: unknown): Promise<Response> =>
@@ -38,13 +38,13 @@ describe("API del chat", () => {
   test("GET /api/health informa proveedor y modelo sin clave", async () => {
     const respuesta = await app.request("/api/health");
     expect(respuesta.status).toBe(200);
-    expect((await respuesta.json()) as Salud).toEqual({ ok: true, provider: "offline", model: "guion-determinista" });
+    expect((await respuesta.json()) as Salud).toEqual({ ok: true, provider: "offline", model: "guion-determinista", studio: false });
   });
 
   test("GET /api/health nunca expone la clave de Gemini", async () => {
     const conClave = await appDePrueba({ GOOGLE_API_KEY: CLAVE_FALSA });
     const texto = await (await conClave.request("/api/health")).text();
-    expect(JSON.parse(texto)).toEqual({ ok: true, provider: "gemini", model: "gemini-2.5-flash" });
+    expect(JSON.parse(texto)).toEqual({ ok: true, provider: "gemini", model: "gemini-2.5-flash", studio: false });
     expect(texto).not.toContain(CLAVE_FALSA);
   });
 
@@ -131,5 +131,71 @@ describe("API del chat", () => {
     expect(permitido.headers.get("access-control-allow-origin")).toBe("https://front.example.com");
     expect(ajeno.headers.get("access-control-allow-origin")).toBeNull();
     expect((await app.request("/api/health", { headers: { origin: "https://front.example.com" } })).headers.get("access-control-allow-origin")).toBeNull();
+  });
+});
+
+describe("LangGraph Studio publicado en /langgraph", () => {
+  let langgraph: ReturnType<typeof Bun.serve>;
+  let app: Hono;
+
+  beforeAll(async () => {
+    // Hace de servidor de LangGraph: devuelve lo que recibió, con su propio CORS, o un stream SSE.
+    langgraph = Bun.serve({
+      port: 0,
+      async fetch(peticion) {
+        const url = new URL(peticion.url);
+        if (url.pathname === "/runs/stream") {
+          return new Response("event: values\ndata: 1\n\nevent: end\ndata: null\n\n", { headers: { "content-type": "text/event-stream" } });
+        }
+        const recibido = { metodo: peticion.method, ruta: url.pathname, consulta: url.search, cuerpo: await peticion.text(), host: peticion.headers.get("host") };
+        return Response.json(recibido, { status: 201, headers: { "access-control-allow-origin": "*" } });
+      },
+    });
+    app = await appDePrueba({ LANGGRAPH_URL: `http://127.0.0.1:${langgraph.port}` });
+  });
+
+  afterAll(() => langgraph.stop(true));
+
+  test("GET /api/health avisa que Studio está publicado", async () => {
+    expect(((await (await app.request("/api/health")).json()) as Salud).studio).toBe(true);
+  });
+
+  test("reenvía método, ruta sin el prefijo, consulta y cuerpo, y devuelve la respuesta tal cual", async () => {
+    const respuesta = await app.request("http://publico.example.com/langgraph/threads/h1/runs?limite=2", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://smith.langchain.com" },
+      body: JSON.stringify({ assistant_id: "recepcionista" }),
+    });
+    expect(respuesta.status).toBe(201);
+    expect(respuesta.headers.get("access-control-allow-origin")).toBe("*");
+    expect(await respuesta.json()).toEqual({
+      metodo: "POST",
+      ruta: "/threads/h1/runs",
+      consulta: "?limite=2",
+      cuerpo: JSON.stringify({ assistant_id: "recepcionista" }),
+      host: `127.0.0.1:${langgraph.port}`,
+    });
+  });
+
+  test("los streams SSE de las ejecuciones pasan completos", async () => {
+    const respuesta = await app.request("/langgraph/runs/stream", { method: "POST", body: "{}" });
+    expect(respuesta.headers.get("content-type")).toBe("text/event-stream");
+    expect(await respuesta.text()).toBe("event: values\ndata: 1\n\nevent: end\ndata: null\n\n");
+  });
+
+  test("si el servidor de LangGraph no responde: 502 JSON legible también para Studio", async () => {
+    const caido = Bun.serve({ port: 0, fetch: () => new Response() });
+    const puerto = caido.port;
+    caido.stop(true);
+    const sinServidor = await appDePrueba({ LANGGRAPH_URL: `http://127.0.0.1:${puerto}` });
+    const respuesta = await sinServidor.request("/langgraph/info");
+    expect(respuesta.status).toBe(502);
+    expect(respuesta.headers.get("access-control-allow-origin")).toBe("*");
+    expect(((await respuesta.json()) as ErrorApi).error.codigo).toBe("langgraph_no_disponible");
+  });
+
+  test("sin LANGGRAPH_URL no se publica nada en /langgraph", async () => {
+    const sinStudio = await appDePrueba();
+    expect((await sinStudio.request("/langgraph/info")).status).toBe(404);
   });
 });

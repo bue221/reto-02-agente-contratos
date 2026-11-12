@@ -20,14 +20,16 @@
     "studio": {
       "name": "agente-contratos-studio",
       "version": "2.0.0",
-      "devDependencies": {
+      "dependencies": {
         "@langchain/core": "^1.4.0",
         "@langchain/langgraph": "^1.7.3",
         "@langchain/langgraph-checkpoint": "^1.2.2",
         "@langchain/langgraph-cli": "^1.7.1",
+        "zod": "^4.1.0",
+      },
+      "devDependencies": {
         "@types/bun": "^1.2.0",
         "typescript": "^5.9.0",
-        "zod": "^4.1.0",
       },
     },
     "web": {

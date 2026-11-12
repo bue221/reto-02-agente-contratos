@@ -20,6 +20,7 @@ const EntornoSchema = z.object({
   MAX_TOKENS_PROCESO: entero(3_000_000),
   PORT: entero(3000),
   CORS_ORIGINS: textoOpcional,
+  LANGGRAPH_URL: z.url({ protocol: /^https?$/ }).optional(),
 });
 
 export interface Configuracion {
@@ -35,6 +36,8 @@ export interface Configuracion {
   puerto: number;
   /** Orígenes del front desplegado aparte (p. ej. Vercel). Vacío: solo mismo origen. */
   origenesCors: string[];
+  /** Servidor de LangGraph (`studio/`) al que se reenvía `/langgraph/*`. Vacío: Studio no se publica. */
+  urlLangGraph: string | undefined;
   /** Raíz del proyecto: `ctx.directory` de las herramientas. */
   directorio: string;
 }
@@ -62,6 +65,7 @@ export function leerConfiguracion(entorno: Record<string, string | undefined> = 
     maxTokensProceso: e.MAX_TOKENS_PROCESO,
     puerto: e.PORT,
     origenesCors: (e.CORS_ORIGINS ?? "").split(",").map((origen) => origen.trim()).filter(Boolean),
+    urlLangGraph: e.LANGGRAPH_URL,
     // `dirname` (no `dir`, exclusivo de Bun) para que también cargue bajo Node en el servidor de LangGraph Studio.
     directorio: join(import.meta.dirname, "..", ".."),
   };

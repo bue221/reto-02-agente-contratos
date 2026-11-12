@@ -10,3 +10,5 @@ docs
 out
 web/dist
 api/tests
+studio/.langgraph_api
+studio/tests

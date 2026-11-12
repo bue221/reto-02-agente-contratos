@@ -29,7 +29,7 @@ Abre <http://localhost:5173>. Para ver los grafos en Studio, en otra terminal: `
 - **Sin clave**: el backend usa el proveedor `offline`, un guion determinista que hace de recepcionista con las mismas herramientas. Alcanza para recorrer la demo completa.
 - **Con Gemini**: `cp .env.example .env` (en la raíz), completa `GOOGLE_API_KEY` y reinicia. Con `LLM_PROVIDER=auto` (por defecto) se usa Gemini si hay clave. La API y Studio leen el mismo `.env`. Para forzar el modo sin modelo aunque haya clave: `LLM_PROVIDER=offline` en `.env`.
 
-`GET /api/health` dice qué proveedor quedó activo: `{ "ok": true, "provider": "offline", "model": "guion-determinista" }`.
+`GET /api/health` dice qué proveedor quedó activo: `{ "ok": true, "provider": "offline", "model": "guion-determinista", "studio": false }` (`studio` es `true` cuando `LANGGRAPH_URL` publica LangGraph Studio en `/langgraph`).
 
 ## Variables de entorno
 
@@ -47,6 +47,7 @@ Todas opcionales. Se validan con zod en `api/src/config.ts`; una variable vacía
 | `MAX_TOKENS_PROCESO` | `3000000` | Tope de tokens del proceso. |
 | `PORT` | `3000` | Puerto del backend (y destino del proxy de Vite). |
 | `CORS_ORIGINS` | vacío | Orígenes del front desplegado aparte, separados por coma. |
+| `LANGGRAPH_URL` | vacío (imagen: `http://127.0.0.1:2024`) | Servidor de LangGraph de `studio/` que la API publica en `/langgraph` ([Studio](Studio.md#desde-la-web)). |
 | `VITE_API_URL` | vacío | Solo en el build del front: URL pública del backend. |
 
 ## Recorrer la demo
@@ -78,7 +79,7 @@ Resultado esperado por mensaje:
 
 ```bash
 bun run demo        # demo.ts: limpia out/, primera pasada, confirma msg-006 y genera alertas (pisa el estado de la app y Studio)
-bun run test        # 162 pruebas: api/tests y studio/tests
+bun run test        # 168 pruebas: api/tests y studio/tests
 bun run typecheck   # api + web + studio
 ```
 
