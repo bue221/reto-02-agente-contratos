@@ -82,7 +82,7 @@ Abre <https://smith.langchain.com/studio?baseUrl=http://localhost:2024>. Es solo
 
 ```bash
 bun install && bun run demo.ts   # procesa los 6 mensajes llamando directo a las herramientas
-bun run test                     # 111 pruebas: api/tests (extracción, reglas, herramientas, motor, ciclo, HTTP, bandeja, reinicio, módulo) y studio/tests
+bun run test                     # 112 pruebas: api/tests (extracción, reglas, herramientas, motor, ciclo, HTTP, bandeja, reinicio, módulo) y studio/tests
 bun run typecheck                # api + web
 ```
 

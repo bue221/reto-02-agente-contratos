@@ -77,7 +77,7 @@ Resultado esperado por mensaje:
 
 ```bash
 bun run demo        # demo.ts: limpia out/, primera pasada, confirma msg-006 y genera alertas
-bun run test        # 111 pruebas: api/tests y studio/tests
+bun run test        # 112 pruebas: api/tests y studio/tests
 bun run typecheck   # api + web + studio
 ```
 

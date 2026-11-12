@@ -1,6 +1,6 @@
 # Pruebas
 
-Runner: `bun test` (sin dependencias extra). 111 pruebas: 106 de la API en `api/tests/` y 5 de los grafos de LangGraph en `studio/tests/` ([LangGraph Studio](Studio.md)); ninguna necesita clave ni red. Se ejecutan con `bun run test` desde la raíz, o `bun test` desde la raíz (todas) o desde `api/` o `studio/`.
+Runner: `bun test` (sin dependencias extra). 112 pruebas: 106 de la API en `api/tests/` y 6 de los grafos de LangGraph en `studio/tests/` ([LangGraph Studio](Studio.md)); ninguna necesita clave ni red. Se ejecutan con `bun run test` desde la raíz, o `bun test` desde la raíz (todas) o desde `api/` o `studio/`.
 
 ## Organización
 

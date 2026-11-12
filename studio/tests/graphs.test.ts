@@ -6,6 +6,7 @@ import { ProveedorOffline } from "../../api/src/llm/offline.ts";
 import { HOY, crearProyecto, leerSalida, lineasJson } from "../../api/tests/helpers.ts";
 import { compilarMotor } from "../src/engine-graph.ts";
 import { compilarRecepcion } from "../src/receptionist-graph.ts";
+import { crearGrafoReinicio } from "../src/reset-graph.ts";
 
 const hilo = (id: string) => ({ configurable: { thread_id: id } });
 
@@ -43,6 +44,19 @@ describe("grafo del motor en LangGraph", () => {
     const tras = await grafo.invoke(new Command({ resume: { decision: "rechazar" } }), hilo("m2"));
     expect(tras.decisiones[0]).toMatchObject({ mensaje_id: "msg-006", resuelto: false });
     expect((await grafo.getState(hilo("m2"))).next).toEqual(["revision_humana"]);
+  });
+});
+
+describe("grafo de reinicio de la demo", () => {
+  test("deja out/ como recién desplegado: maestro del fixture y los seis mensajes pendientes", async () => {
+    const ctx = await crearProyecto();
+    await compilarMotor({ directorio: ctx.directory }, new MemorySaver()).invoke({ hoy: HOY }, hilo("x1"));
+    expect(await leerSalida(ctx, "sharepoint", "maestro-contratos.csv")).toContain("CT-2026-015");
+
+    const final = await crearGrafoReinicio({ directorio: ctx.directory }).compile().invoke({});
+    expect(final).toEqual({ mensajes: 6, error: null });
+    expect(await leerSalida(ctx, "sharepoint", "maestro-contratos.csv")).not.toContain("CT-2026-015");
+    expect(await leerSalida(ctx, "procesados.json")).toBe("");
   });
 });
 

@@ -18,7 +18,15 @@ bun run studio          # langgraphjs dev en http://localhost:2024
 
 Abre <https://smith.langchain.com/studio?baseUrl=http://localhost:2024> (pide iniciar sesión en LangSmith; la cuenta gratuita basta). El servidor corre bajo Node con recarga en caliente y carga `../.env`: con `GOOGLE_API_KEY` la recepcionista usa Gemini; sin clave, el proveedor offline.
 
-Los grafos usan la **misma raíz del proyecto** que la app: lo que se registre en Studio aparece en el Buzón, la Bandeja y el Maestro de `bun run dev`. Para empezar de cero, **Reiniciar demo** en el front o `POST /api/demo/reset`.
+Los grafos usan la **misma raíz del proyecto** que la app: lo que se registre en Studio aparece en el Buzón, la Bandeja y el Maestro de `bun run dev`. Para empezar de cero, ejecuta el grafo `reiniciar_demo`, **Reiniciar demo** en el front o `POST /api/demo/reset`, y abre un hilo nuevo (los hilos de Studio guardan sus `pendientes` aparte, en `studio/.langgraph_api/`).
+
+## `reiniciar_demo`
+
+```
+__start__ ─▶ reiniciar ─▶ __end__
+```
+
+Pestaña **Graph**, entrada `{}`, **Submit**. Llama al mismo `reiniciarDemo()` que `POST /api/demo/reset`: borra `out/`, vuelve a copiar el maestro del fixture y devuelve `{ "mensajes": 6, "error": null }`. Es un grafo aparte, no una herramienta, para que el modelo nunca pueda borrar `out/`. A diferencia del endpoint, no vacía las sesiones que la API tenga en memoria: si `bun run dev` está corriendo, abre también una sesión de chat nueva en el front.
 
 ## `recepcionista`
 
@@ -68,4 +76,4 @@ Estado: `hoy`, `mensaje_ids`, `cola`, `actual` (el mensaje en curso y su `recorr
 
 ## Pruebas
 
-`studio/tests/graphs.test.ts` (5 pruebas, en `bun run test`): el motor pausa en msg-006 y reanuda con la decisión, una respuesta inválida vuelve a pausar, la recepcionista repite el flujo del PRD §11 con el proveedor offline, `recepcion_procesar_buzon` recorre el motor como subgrafo visible con el mismo resultado, y la guarda CA3 rige también aquí.
+`studio/tests/graphs.test.ts` (6 pruebas, en `bun run test`): el motor pausa en msg-006 y reanuda con la decisión, una respuesta inválida vuelve a pausar, `reiniciar_demo` deja `out/` como recién desplegado, la recepcionista repite el flujo del PRD §11 con el proveedor offline, `recepcion_procesar_buzon` recorre el motor como subgrafo visible con el mismo resultado, y la guarda CA3 rige también aquí.
