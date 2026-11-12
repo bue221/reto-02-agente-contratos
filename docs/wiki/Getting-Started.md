@@ -41,6 +41,7 @@ Todas opcionales. Se validan con zod en `api/src/config.ts`; una variable vacía
 | `GOOGLE_API_KEY` | — | Clave de Gemini (secreto, solo backend). |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Modelo de Gemini. |
 | `LLM_TIMEOUT_MS` | `60000` | Timeout por llamada al proveedor. |
+| `LLM_REINTENTOS` | `2` | Reintentos ante 429, 5xx o fallo de red (no ante timeout), con espera exponencial; máx. 5. |
 | `MAX_ITERACIONES` | `25` | Tope de llamadas al modelo por turno (CA1). |
 | `MAX_TOKENS_SESION` | `300000` | Tope de tokens por sesión. |
 | `MAX_TOKENS_PROCESO` | `3000000` | Tope de tokens del proceso. |
@@ -77,7 +78,7 @@ Resultado esperado por mensaje:
 
 ```bash
 bun run demo        # demo.ts: limpia out/, primera pasada, confirma msg-006 y genera alertas (pisa el estado de la app y Studio)
-bun run test        # 148 pruebas: api/tests y studio/tests
+bun run test        # 162 pruebas: api/tests y studio/tests
 bun run typecheck   # api + web + studio
 ```
 

@@ -1,6 +1,6 @@
 # Ciclo del agente
 
-Código: `api/src/agent/loop.ts` (`AgenteContratos`), `api/src/agent/execution.ts` (guarda de confirmación), `api/src/agent/guardrails/` (guardas de alcance y manipulación), `api/src/agent/sessions.ts`, `api/src/agent/prompt.ts`, `api/src/agent/model-tools.ts`.
+Código: `api/src/agent/loop.ts` (`AgenteContratos`), `api/src/agent/execution.ts` (guarda de confirmación), `api/src/agent/guardrails/` (guardas de alcance, manipulación y respaldo), `api/src/agent/sessions.ts`, `api/src/agent/prompt.ts`, `api/src/agent/model-tools.ts`.
 
 El ciclo es un **ReAct de la recepcionista**: el modelo solo ve las cinco herramientas `recepcion_*` y decide cuándo consultar, cuándo encender el motor y cuándo reanudarlo. El camino de cada contrato (extraer → validar → decidir → registrar / pausar / cerrar → alertas) lo fija el motor determinista; ver [Arquitectura → Dos grafos](Architecture.md#dos-grafos-la-recepcionista-y-el-motor).
 
@@ -52,12 +52,14 @@ Pasos en código (`#turno` → `#resolver` → `#ejecutarLlamadas` → `#cerrarT
 4. **Bucle**: verifica topes de tokens, llama a `proveedor.enviar` con el prompt de sistema y el historial, y ejecuta las llamadas que devuelva. Los resultados se agregan al historial como mensajes `herramienta`.
 5. **Cerrar el turno**: calcula `needsConfirmation`, agrega una pregunta si el texto del modelo no termina en `?`, cierra el historial con un mensaje del asistente (para conservar la alternancia de roles) y persiste.
 
+**Eventos en vivo**: `conversar(sessionId, mensaje, observador?)` acepta un observador opcional que recibe `modelo` (antes de cada llamada al proveedor), `herramienta` (antes de ejecutar una `recepcion_*`), `paso` (cada `contratos_*` del motor, vía `ctx.alPaso`) y `resultado` (la llamada terminada). Lo usa `POST /api/chat/stream`. Un observador que lanza (por ejemplo, porque el cliente cerró la conexión) se registra en consola y no interrumpe el turno: el resultado queda igual en la sesión.
+
 ## Reglas del ciclo (PRD §6.3)
 
 | Regla | Cómo se cumple | Dónde |
 |---|---|---|
 | **CA1** tope de iteraciones | `MAX_ITERACIONES` (25) llamadas al modelo por turno. Al agotarse, responde con lo hecho (cada llamada con su resumen), lo que falta e invita a «continúa». | `loop.ts` `mensajeDeTope` |
-| **CA2** no afirmar sin herramienta | El prompt lo prohíbe; el diseño lo hace innecesario: el modelo no extrae, no clasifica ni elige el camino, y `validar`/`registrar` reextraen en el servidor. | `agent/prompt.md`, `workflows/contract-graph.ts` |
+| **CA2** no afirmar sin herramienta | El prompt lo prohíbe; el diseño lo hace innecesario: el modelo no extrae, no clasifica ni elige el camino, y `validar`/`registrar` reextraen en el servidor. Además, la **guarda de respaldo** revisa la respuesta final (ver abajo). | `agent/prompt.md`, `workflows/contract-graph.ts`, `guardrails/grounding.ts` |
 | **CA3** confirmación humana | La pausa la decide el motor + guarda en el servidor + pregunta forzada (ver abajo). | `execution.ts`, `loop.ts` |
 | **CA4** llamadas visibles | Cada llamada va en `toolCalls` (nombre, args, ok, resumen) con las `contratos_*` del motor en `pasos`, en el historial de la sesión y en `out/log.jsonl`. | `execution.ts`, `workflows/tool-call.ts`, `tools/tool.ts` |
 | **CA5** errores legibles | Error del proveedor o interno → `reply` en lenguaje claro; la sesión sigue. `conversar` nunca lanza. | `loop.ts` `errorDeProveedor` |
@@ -93,8 +95,9 @@ La recepcionista solo atiende la recepción de contratos. La sección «Alcance�
 | **Reglas deterministas** (`input-guard.ts`, `reglaDeManipulacion`) | Expresiones sobre el texto normalizado: anular instrucciones, pedir el prompt de sistema o la configuración, cambio de rol, «modo desarrollador» o *jailbreak*, pedir la clave del modelo, etiquetas `<system>` o `[INST]`. | Respuesta fija sin llamar al modelo ni al clasificador. |
 | **Clasificador de alcance** (`scope-classifier.ts`, `ClasificadorLlm`) | Llamada aparte al mismo `ProveedorLlm`: sin herramientas ni historial, con prompt fijo en el código. Recibe el mensaje y la última respuesta de la recepcionista (para entender un «sí, confirmo») entre etiquetas, con `<` y `>` neutralizados. Solo puede devolver `permitido`, `fuera_de_alcance` o `manipulacion`, validado con zod. Lo mezclado («procesa el buzón y escríbeme un poema») es `fuera_de_alcance`. | Respuesta fija. Si el clasificador falla o devuelve otra cosa, el mensaje **no pasa** (falla cerrado) y se pide reintentar. |
 | **Guarda de salida** (`output-guard.ts`) | Un canario aleatorio por proceso va al inicio del prompt de sistema. Si aparece en la respuesta del modelo, está volcando sus instrucciones. | La respuesta se reemplaza por una fija antes de llegar al chat. |
+| **Guarda de respaldo** (`grounding.ts`, CA2) | Extrae de la respuesta final del modelo los datos que más daño hacen si se inventan: ids de contrato (`CT-2026-015`), ids de mensaje, fechas ISO y montos (cifras con separadores de miles o de 4 dígitos o más, normalizadas: `$265.000.000` = `265000000`). Cada uno debe aparecer en el prompt de sistema, en un mensaje de la analista o en un resultado de herramienta de la sesión; las respuestas anteriores del modelo no cuentan como fuente. | No reescribe ni bloquea: agrega un aviso visible con los datos sin respaldo («Verificación del servidor: …»), para no esconder el error. |
 
-Las respuestas de bloqueo no las redacta el modelo y recuerdan lo que sigue pendiente de confirmación. Un mensaje bloqueado no entra al historial que se reenvía al modelo: en la app queda solo en `turnos`, y en Studio `aMensajesLlm` omite el par marcado con `additional_kwargs.bloqueado`. Así no contamina los turnos siguientes. Cada bloqueo queda en `out/log.jsonl` como `guarda_entrada` o `guarda_salida`, con el motivo y sin el texto del mensaje. Los tokens del clasificador cuentan para los topes de costo, y con el tope alcanzado no se llama.
+Las respuestas de bloqueo no las redacta el modelo y recuerdan lo que sigue pendiente de confirmación. Un mensaje bloqueado no entra al historial que se reenvía al modelo: en la app queda solo en `turnos`, y en Studio `aMensajesLlm` omite el par marcado con `additional_kwargs.bloqueado`. Así no contamina los turnos siguientes. Cada intervención queda en `out/log.jsonl` como `guarda_entrada`, `guarda_salida` o `guarda_respaldo`, con el motivo y sin el texto del mensaje. Los tokens del clasificador cuentan para los topes de costo, y con el tope alcanzado no se llama.
 
 El clasificador se activa con Gemini (`crearClasificador`). Con el proveedor offline solo rigen las reglas deterministas: su guion no se puede desviar y responde su ayuda ante todo lo que no reconoce. El clasificador también es un modelo y se podría engañar, pero lo peor que se logra es un `permitido`: el mensaje sigue frente al prompt, al conjunto de cinco `recepcion_*`, a la guarda CA3 y a la revalidación del motor.
 

@@ -1,6 +1,6 @@
 # Pruebas
 
-Runner: `bun test` (sin dependencias extra). 148 pruebas: 141 de la API en `api/tests/` y 7 de los grafos de LangGraph en `studio/tests/` ([LangGraph Studio](Studio.md)); ninguna necesita clave ni red. Se ejecutan con `bun run test` desde la raíz, o `bun test` desde la raíz (todas) o desde `api/` o `studio/`.
+Runner: `bun test` (sin dependencias extra). 162 pruebas: 155 de la API en `api/tests/` y 7 de los grafos de LangGraph en `studio/tests/` ([LangGraph Studio](Studio.md)); ninguna necesita clave ni red. Se ejecutan con `bun run test` desde la raíz, o `bun test` desde la raíz (todas) o desde `api/` o `studio/`.
 
 ## Organización
 
@@ -43,7 +43,7 @@ Se dispara con cambios en `api/`, `agent/`, `modulo/`, `fixtures/`, `web/`, `dem
 
 | Job | Pasos |
 |---|---|
-| `verificar` | `bun install --frozen-lockfile` → typecheck de `api/` → `sync:module --check` → `bun test` → `bun run demo`. |
+| `verificar` | `bun install --frozen-lockfile` → typecheck de `api/`, `web/` y `studio/` → `sync:module --check` → `bun test` → `bun run demo`. |
 | `imagen` | Construye la imagen Docker, la levanta y espera `GET /api/health` (30 s). |
 
 CI usa `LLM_PROVIDER=offline`: nunca llama a Gemini ni necesita secretos.

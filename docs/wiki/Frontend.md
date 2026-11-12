@@ -9,7 +9,7 @@ React 19 + Vite 6 + TypeScript, sin librerías de UI ni de estado. Código en `w
 | **Buzón** | `views/MailboxView.tsx` | Los 6 correos con su estado. **Analizar** procesa uno; **Analizar todo en orden** recorre los pendientes con progreso y **Detener**. El detalle trae la línea de tiempo de 7 pasos, el correo y el adjunto al lado de lo extraído (confianza y evidencia por campo), la clasificación y la auditoría. |
 | **Bandeja de aprobación** | `views/ApprovalTrayView.tsx` | Lo que espera decisión humana (contador en la pestaña): campos editables, **Confirmar datos y registrar** o **Rechazar** con motivo. A la derecha, las decisiones ya tomadas (bandeja o chat). |
 | **Maestro CSV** | `views/MasterView.tsx` | El maestro de trabajo con las filas creadas o modificadas por una aprobación resaltadas, y **Descargar CSV**. |
-| **Chat** | `views/ChatView.tsx` | Turnos, cada llamada a herramienta (nombre, argumentos, resultado), burbuja resaltada y banner **Confirmo** cuando el agente pide confirmación. Abre por defecto. |
+| **Chat** | `views/ChatView.tsx` | Turnos, cada llamada a herramienta (nombre, argumentos, resultado), burbuja resaltada y banner **Confirmo** cuando el agente pide confirmación. Mientras corre el turno muestra el progreso en vivo (`components/TurnProgress.tsx`): qué hace el modelo, la herramienta en curso y cada paso del motor apenas termina, vía `POST /api/chat/stream` (`lib/api.ts` `enviarMensajeEnVivo`, `lib/sse.ts`, `lib/turn-progress.ts`). Abre por defecto. |
 
 `App.tsx` arma la barra lateral (pestañas, contadores, proveedor activo, **Aprobador**, **Reiniciar demo**) y vuelve a pedir buzón, bandeja y maestro (`refrescar`) tras cada acción o turno del chat.
 

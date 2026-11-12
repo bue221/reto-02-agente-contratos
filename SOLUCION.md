@@ -14,9 +14,9 @@ Desde el 30 de mayo de 2026 nadie alimenta el maestro de contratos y solo llegan
 │   correo vs extracción)│    needsConfirmation} │   recepcion_* (tools/recepcion.ts) → …       │
 │ - Bandeja de aprobación│  /api/buzon/*         │  Motor determinista (application/workflows): │
 │ - Maestro CSV          │  /api/bandeja/*       │   ingestar → extraer → validar → decidir →   │
-│ - Chat (tool calls y   │  /api/maestro(.csv)   │   registrar | esperar_revision | cerrar →    │
+│ - Chat (tool calls y   │  /api/chat/stream SSE │   registrar | esperar_revision | cerrar →    │
 │   pasos del motor,     │  /api/demo/reset      │   alertas; la bandeja reanuda la misma pausa │
-│   confirmación)        │                       │  ProveedorLlm: Gemini (fetch) | Offline       │
+│   confirmación)        │  /api/maestro(.csv)   │  ProveedorLlm: Gemini (fetch) | Offline       │
 └────────────────────────┘                       │  Sesiones: memoria + out/sesiones/<id>.json   │
                                                  │  AccesoOut: turnos/bandeja comparten out/     │
                                                  └──────────────┬───────────────────────────────┘
@@ -54,8 +54,9 @@ El prompt y el conocimiento **se leen en cada turno**: cambiar una regla del pro
 3. **Bucle** hasta `MAX_ITERACIONES` (25): verifica topes de tokens → `proveedor.enviar(mensajes, herramientas recepcion_*)` → si la respuesta no trae llamadas, es la respuesta final; si trae, ejecuta cada una (valida con zod, nunca lanza, escribe `out/log.jsonl`) y agrega los resultados al historial. Los argumentos inválidos y las herramientas fuera de las cinco `recepcion_*` (incluidas las `contratos_*`, que solo llama el motor) vuelven al modelo como `{ ok: false, error }` para que se corrija.
 4. **CA1**: si se agota el tope, responde con lo que alcanzó a hacer (cada llamada con su resumen) y lo que falta, e invita a «continúa».
 5. **Topes de costo**: tokens por sesión (`MAX_TOKENS_SESION`) y por proceso (`MAX_TOKENS_PROCESO`, para que abrir sesiones nuevas no evada el límite). Al llegar, se corta antes de llamar al modelo con un mensaje claro.
-6. **CA5**: un error del proveedor (HTTP, red, timeout por `AbortController`, respuesta bloqueada) o interno vuelve como `reply` legible; el turno siempre cierra con un mensaje del asistente para que la sesión siga siendo válida para el modelo.
-7. **CA4**: cada llamada queda en `toolCalls` (nombre, argumentos, ok, resumen, y en `pasos` las `contratos_*` que ejecutó el motor por debajo), en el historial de la sesión (`GET /api/sessions/:id`) y en `out/log.jsonl`.
+6. **CA5**: un error del proveedor (HTTP, red, timeout por `AbortController`, respuesta bloqueada) o interno vuelve como `reply` legible; el turno siempre cierra con un mensaje del asistente para que la sesión siga siendo válida para el modelo. Antes, el adaptador de Gemini reintenta los fallos transitorios (429, 5xx, red) con espera exponencial acotada (`LLM_REINTENTOS`). Un timeout no se reintenta, para no multiplicar la espera.
+7. **CA4**: cada llamada queda en `toolCalls` (nombre, argumentos, ok, resumen, y en `pasos` las `contratos_*` que ejecutó el motor por debajo), en el historial de la sesión (`GET /api/sessions/:id`) y en `out/log.jsonl`. Con `POST /api/chat/stream` el chat las ve **en vivo** (SSE): qué hace el modelo, la herramienta en curso y cada paso del motor apenas termina.
+8. **CA2 en el servidor**: la respuesta final del modelo pasa por la guarda de respaldo (`api/src/agent/guardrails/grounding.ts`). Cada id de contrato, id de mensaje, fecha ISO o monto que cite debe aparecer en el prompt, en un mensaje de la analista o en un resultado de herramienta. Si alguno no aparece, la respuesta llega con un aviso que lo nombra y queda `guarda_respaldo` en `out/log.jsonl`.
 
 **Confirmación humana (CA3), determinista y no solo por prompt:**
 
@@ -125,6 +126,8 @@ Determinista sobre `contrato.txt` (`api/src/core/extraction/`), sin modelo:
 | **Bandeja de aprobación además del chat** | Solo el chat | La analista revisa campo por campo con la evidencia al lado y corrige en un formulario, sin depender de que el modelo traduzca bien «confirmo …». La bandeja no duplica reglas: reanuda la pausa del motor con la misma función que el chat, así que RN5 y la revalidación en el servidor son idénticas. |
 | **Estado de revisión derivado de `out/` (`analisis.json` + `procesados.json`)** | Pendientes solo dentro de cada sesión de chat | Con pendientes por sesión, la bandeja no vería lo que dejó el chat y una aprobación en la bandeja no se reflejaría en el chat. Derivarlo de archivos que ya escriben las herramientas da una fuente única. Costo: la guarda CA3 del chat sigue siendo por sesión (el agente debe haber preguntado en esa conversación). |
 | **Reinicio de la demo por API con cerrojo lector/escritor** | Redesplegar para limpiar `out/` | El link público es compartido: sin reinicio, el primero que procesa el buzón deja a los demás sin nada que probar. El cerrojo evita borrar `out/` en medio de un turno. |
+| **CA2 como aviso del servidor sobre ids, fechas y montos** | Pedirle al modelo que se corrija (otra llamada) o reemplazar la respuesta | Es determinista, no gasta tokens y no esconde el error: la analista ve exactamente qué dato no tiene respaldo. Revisar solo datos con formato reconocible evita falsos positivos en texto libre. Costo: no detecta una fecha en prosa ni una cifra en palabras. |
+| **Streaming por SSE sobre `POST` (`/api/chat/stream`)** | WebSocket, o consultar el estado de la sesión cada pocos segundos | El turno es una petición con eventos de ida: SSE alcanza, pasa por proxies y balanceadores sin configuración y se lee con `fetch` (~20 líneas, sin dependencias). `/api/chat` queda intacto como contrato del PRD. Costo: `EventSource` no admite `POST`, así que el front trae su propio lector de SSE. |
 | **Render de Markdown propio en el front (subconjunto)** | `react-markdown` + `remark-gfm` | Las respuestas solo usan tablas, títulos, listas, negrita y código; ~100 líneas sin dependencias y sin HTML crudo (React escapa todo, sin superficie de inyección desde el texto del modelo). |
 | **Mantener el `Contrato` completo como argumento de `validar`/`registrar`** | Pasar solo `mensaje_id` + correcciones | Es el contrato de herramientas del PRD. Desde que las llama el motor, el contrato lo arma el servidor y el modelo solo envía `mensaje_id` y las correcciones que dictó la analista. El esquema sigue tolerando campos `null` omitidos o `evidencia: null` para quien use `modulo/tools/contratos.ts` directamente. |
 
@@ -177,12 +180,12 @@ Determinista sobre `contrato.txt` (`api/src/core/extraction/`), sin modelo:
 | HU-3 Validar y clasificar | Hecho | Normalización de razón social más robusta; maestro con más volumen (índices). |
 | HU-4 Registrar y archivar | Hecho (confirmación desde el chat o la Bandeja de aprobación) | SharePoint real (Graph API), escrituras transaccionales y bloqueo entre procesos. |
 | HU-5 Alertar | Hecho | Envío programado del reporte (correo/Teams) y fecha `hoy` automática. |
-| HU-6 Manejo de errores | Hecho | Reintentos con backoff ante fallos transitorios del proveedor. |
+| HU-6 Manejo de errores | Hecho (incluye reintentos con espera exponencial ante fallos transitorios de Gemini) | Fallback a otro proveedor ante caídas prolongadas. |
 
 | Regla del ciclo / requisito | Estado | Evidencia |
 |---|---|---|
 | CA1 tope de iteraciones | Hecho | `MAX_ITERACIONES`; test "CA1". |
-| CA2 no afirmar valores sin herramienta | Parcial | Prompt + diseño (el modelo no es fuente de valores); un modelo aún puede resumir de memoria (ver riesgos). |
+| CA2 no afirmar valores sin herramienta | Hecho | Prompt + diseño (el modelo no es fuente de valores) + guarda de respaldo en el servidor, en la app y en Studio, que señala ids, fechas y montos sin respaldo; tests unitarios y de ciclo. Cubre datos con formato reconocible, no frases libres (ver riesgos). |
 | CA3 confirmación humana | Hecho | Detección determinista, pregunta forzada, guarda en servidor, banner en el chat y Bandeja de aprobación que comparte la misma verdad; tests de chat ↔ bandeja. |
 | Bandeja HITL y reinicio de la demo | Hecho | `/api/buzon`, `/api/bandeja`, `/api/demo/reset`; tests de aprobar con correcciones (msg-006 → valor 0, fin 2027-08-31), rechazar, errores zod y reinicio durante un turno. |
 | CA4 llamadas visibles y en log | Hecho | `toolCalls`, historial de sesión, `out/log.jsonl`; test. |
@@ -210,13 +213,13 @@ Descartado de lo propuesto: mantener LangGraph (más dependencias y comportamien
 | Riesgo | Mitigación |
 |---|---|
 | Contratos escaneados o formatos nuevos que la extracción no reconoce. | OCR + extracción asistida por modelo **solo como propuesta**; todo lo bajo 0.8 sigue pasando por revisión humana. Medir % de campos en revisión por mes. |
-| El modelo afirma o recalcula un valor de memoria (en una prueba en vivo de la versión anterior actualizó una lista de alertas sin volver a llamar la herramienta). | Ya mitigado en parte: `recepcion_responder_revision` regenera las alertas tras cada decisión y el modelo no calcula nada. Falta validar en el servidor que cifras e ids de la respuesta existan en resultados de herramientas del turno, o renderizar las tablas desde `toolCalls` en lugar de texto libre. |
+| El modelo afirma o recalcula un valor de memoria (en una prueba en vivo de la versión anterior actualizó una lista de alertas sin volver a llamar la herramienta). | `recepcion_responder_revision` regenera las alertas tras cada decisión, el modelo no calcula nada y la guarda de respaldo señala todo id, fecha ISO o monto que no salga de herramientas o de la analista. Queda fuera lo que no tiene formato reconocible: fechas en prosa («31 de agosto»), cifras en palabras o conteos pequeños. Siguiente paso: armar las tablas del chat desde `toolCalls` en lugar de texto libre. |
 | Inyección de instrucciones desde el texto del contrato o del correo. | Las herramientas son la única vía de escritura, no hay shell ni edición de archivos, y `confirmado` lo controla el servidor. El prompt trata documentos y resultados de herramientas como datos, no como instrucciones. Falta delimitar el texto de documentos en los resultados. |
 | Uso del chat para temas ajenos al proceso (cálculos, charla, programación) o intentos de cambiarle el rol. | Guardas en el servidor (`api/src/agent/guardrails/`), no solo en el prompt: reglas deterministas contra manipulación, un clasificador de alcance aislado que falla cerrado y un canario que detecta el volcado del prompt de sistema. Lo bloqueado recibe una respuesta fija, no entra al historial del modelo y queda en `out/log.jsonl`. Falta: métricas de bloqueos y revisión periódica de falsos positivos. |
 | Estado compartido en el link público: cualquiera puede procesar, aprobar o reiniciar la demo para todos. | Aceptable para la demo (botón con confirmación). En producción: autenticación, aprobador tomado de la identidad y no de un campo libre, reinicio deshabilitado. |
 | Abuso del link público y gasto de la clave. | Topes de iteraciones y tokens por sesión y por proceso; en producción, autenticación (SSO) y límite por IP/usuario. |
 | Pérdida de datos: disco efímero, CSV sin transacciones, varios procesos. | Persistir en SharePoint/almacenamiento durable; escritura atómica y bloqueo; respaldo diario del maestro y del historial. |
 | Datos personales y comerciales en `out/log.jsonl` y sesiones. | Retención limitada, acceso restringido, no registrar el texto completo del contrato en logs. |
-| Caída o latencia del proveedor (≈ 1 minuto por buzón). | Timeout y error claro ya implementados; agregar streaming de eventos al front, reintentos con backoff y fallback al proveedor offline o a otro modelo vía `ProveedorLlm`. |
+| Caída o latencia del proveedor (≈ 1 minuto por buzón). | Timeout, error claro, reintentos con espera exponencial ante 429/5xx/red y streaming de eventos al chat (la analista ve el avance y los latidos SSE evitan que un proxy corte la conexión) ya implementados. Falta fallback al proveedor offline o a otro modelo vía `ProveedorLlm` ante una caída prolongada. |
 | Falsos duplicados por variaciones del nombre del cliente. | Deduplicar por NIT antes que por nombre (ya implementado) y revisar conflictos NIT/razón social. |
 | El proceso muere otra vez por rotación. | Regla de gobierno con dueño por rol, suplente, indicador mensual y conocimiento del proceso versionado en el repositorio. |

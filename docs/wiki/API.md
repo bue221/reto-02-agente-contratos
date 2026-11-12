@@ -8,6 +8,7 @@ Código: `api/src/http/app.ts` (chat, salud, sesiones, maestro), `api/src/http/h
 |---|---|---|---|
 | `GET` | `/api/health` | — | `{ ok: true, provider, model }` (sin claves) |
 | `POST` | `/api/chat` | `{ sessionId, message }` | `{ reply, toolCalls: [{ nombre, args, ok, resumen }], needsConfirmation }` |
+| `POST` | `/api/chat/stream` | `{ sessionId, message }` | `text/event-stream`: el mismo turno con sus eventos en vivo (ver abajo) |
 | `GET` | `/api/sessions/:id` | — | Sesión completa: `turnos[]`, `mensajes[]`, `tokens`, `pendientesConfirmacion[]` |
 | `GET` | `/api/maestro` | — | `{ filas[] }` del maestro de trabajo |
 | `GET` | `/api/maestro.csv` | — | Descarga del CSV (`text/csv`, `attachment`) |
@@ -20,6 +21,20 @@ Código: `api/src/http/app.ts` (chat, salud, sesiones, maestro), `api/src/http/h
 | `POST` | `/api/demo/reset` | — | `{ ok: true, mensajes }` |
 
 Rutas fuera de `/api/*` sirven el front compilado (`web/dist`) si existe, con fallback a `index.html`.
+
+## Streaming del chat
+
+`POST /api/chat/stream` ejecuta el mismo turno que `/api/chat` (mismo esquema zod, mismo cerrojo de `out/`) y emite cada evento como `data: <JSON>` de SSE, con la forma `EventoChat` de `api/src/http/types.ts`:
+
+| `tipo` | Cuándo | Contenido |
+|---|---|---|
+| `modelo` | Antes de cada llamada al proveedor | `iteracion` (1, 2, …) |
+| `herramienta` | El modelo pidió una `recepcion_*` | `nombre`, `args` |
+| `paso` | Terminó una `contratos_*` del motor | `paso` (`LlamadaVisible`) |
+| `resultado` | Terminó la `recepcion_*` | `llamada` (`LlamadaVisible` con sus `pasos`) |
+| `fin` | Último evento, siempre | `respuesta`: la misma `RespuestaChat` que devolvería `/api/chat` |
+
+Cada 15 s se envía un comentario `: latido` para que proxies y balanceadores no corten la conexión mientras el modelo piensa. Un cuerpo inválido responde `400` JSON, no un stream. Si el cliente se desconecta, el turno termina igual y queda en la sesión. El front usa esta ruta y, si el backend responde `404` (desplegado antes que el front), reenvía por `/api/chat`.
 
 ## Validación de cuerpos
 
@@ -68,7 +83,7 @@ curl -s -X POST localhost:3000/api/demo/reset
 
 ## Concurrencia y trazabilidad
 
-- `/api/chat` y las lecturas usan `AccesoOut` en modo compartido; `/api/demo/reset` en modo exclusivo (espera turnos en curso).
+- `/api/chat`, `/api/chat/stream` y las lecturas usan `AccesoOut` en modo compartido; `/api/demo/reset` en modo exclusivo (espera turnos en curso).
 - Las acciones de la bandeja (`procesar`, `aprobar`, `rechazar`) se serializan con un cerrojo propio porque leen y reescriben los mismos JSON.
 - Cada acción de la bandeja pasa por las herramientas y queda en `out/log.jsonl`; las decisiones humanas, en `out/decisiones.jsonl`.
 

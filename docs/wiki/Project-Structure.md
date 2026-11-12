@@ -53,7 +53,8 @@ api/src/
 │   │   ├── input-guard.ts     revisarEntrada: reglas contra manipulación + clasificador, respuestas fijas
 │   │   ├── scope-classifier.ts ClasificadorLlm: veredicto de alcance aislado, sin herramientas, falla cerrado
 │   │   ├── output-guard.ts    canario en el prompt de sistema y revisarSalida
-│   │   └── audit.ts           bloqueos a out/log.jsonl (sin el texto del mensaje)
+│   │   ├── grounding.ts       revisarRespaldo (CA2): ids, fechas y montos sin respaldo en herramientas o analista
+│   │   └── audit.ts           intervenciones de las guardas a out/log.jsonl (sin el texto del mensaje)
 │   ├── model-tools.ts         definiciones que ve el modelo: solo recepcion_* (JSON Schema desde zod)
 │   ├── prompt.ts              lee agent/prompt.md + conocimiento en cada turno
 │   ├── sessions.ts            SesionesEnArchivo (memoria + out/sesiones/) y CerrojoPorSesion
@@ -62,14 +63,14 @@ api/src/
 ├── llm/
 │   ├── adapter.ts             interfaz ProveedorLlm y tipos de mensajes (PRD)
 │   ├── factory.ts             crearProveedor(config): único punto que conoce las implementaciones
-│   ├── gemini.ts              ProveedorGemini: REST generateContent con fetch
+│   ├── gemini.ts              ProveedorGemini: REST generateContent con fetch, timeout y reintentos
 │   ├── offline.ts             ProveedorOffline: recepcionista con guion determinista, 0 tokens
 │   └── offline/
 │       ├── script.ts          siguientePaso(historial): qué herramienta recepcion_* llamar o qué responder
 │       ├── history.ts         lectura del historial (ejecuciones previas, último mensaje del usuario)
 │       └── replies.ts         redacción de respuestas con datos de herramientas
 ├── http/
-│   ├── app.ts                 crearApp: health, chat, sesiones, maestro, CORS, front estático, 404/500
+│   ├── app.ts                 crearApp: health, chat (JSON y SSE), sesiones, maestro, CORS, front estático, 404/500
 │   ├── hitl.ts                buzón, bandeja, descarga CSV y reinicio de la demo
 │   ├── helpers.ts             errores tipados, leerCuerpo (zod), responder (código → HTTP)
 │   └── types.ts               tipos compartidos con el front
@@ -136,13 +137,16 @@ web/
     │   ├── MailboxView.tsx     Buzón: lista, analizar, detalle con línea de tiempo y extracción
     │   ├── ApprovalTrayView.tsx Bandeja: pendientes editables y decisiones tomadas
     │   ├── MasterView.tsx      Maestro CSV con filas resaltadas y descarga
-    │   └── ChatView.tsx        Chat: turnos, llamadas a herramientas, banner de confirmación
+    │   └── ChatView.tsx        Chat: turnos, progreso en vivo, llamadas a herramientas, banner de confirmación
     ├── components/
     │   ├── ProposalCard.tsx    ProposalCard (aprobar/rechazar con correcciones) y ResolutionCard
     │   ├── ToolCallList.tsx    ToolCall y ToolCallList
+    │   ├── TurnProgress.tsx    el turno mientras corre: herramienta en curso y pasos del motor
     │   └── MarkdownText.tsx    render de Markdown propio (tablas, listas, títulos, código)
     ├── lib/
-    │   ├── api.ts              cliente único de la API + tipos reexportados de api/src/http/types.ts
+    │   ├── api.ts              cliente único de la API (incluye el chat por SSE) + tipos reexportados de api/src/http/types.ts
+    │   ├── sse.ts              lector de Server-Sent Events sobre fetch (POST)
+    │   ├── turn-progress.ts    aplicarEvento: eventos del turno → progreso visible
     │   └── format.ts           etiquetas, formatos de valores y fechas, mensajes de error
     └── styles/
         ├── global.css

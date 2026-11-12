@@ -40,6 +40,7 @@ interface RespuestaLlm { texto: string; llamadas: LlamadaHerramienta[]; uso: { e
 - REST `POST https://generativelanguage.googleapis.com/v1beta/models/<modelo>:generateContent` con `fetch`, sin SDK.
 - `temperature: 0`.
 - Timeout por llamada con `AbortController` (`LLM_TIMEOUT_MS`).
+- Reintentos ante fallos transitorios (`LLM_REINTENTOS`, por defecto 2): HTTP 429, 500, 502, 503, 504 o fallo de red. Espera exponencial de 1 s, 2 s, 4 s…, o la que pida `Retry-After`, siempre con un máximo de 10 s. Un timeout o un error que no es transitorio (400, clave inválida, respuesta bloqueada) no se reintenta, y al agotar los reintentos el error dice cuántos intentos hubo. Cada reintento queda en consola (`[gemini] … reintento n/N`), sin la clave.
 - Mapea roles y llamadas al formato de Gemini (`functionCall` / `functionResponse`) y reenvía `thoughtSignature`.
 - La respuesta se valida con zod; un bloqueo (`promptFeedback`) o un candidato vacío vuelven como error legible.
 - Tokens: entrada = `promptTokenCount`; salida = `candidatesTokenCount + thoughtsTokenCount`.

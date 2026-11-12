@@ -45,7 +45,7 @@ Luego: `confirmo el valor 0 y la fecha fin 2027-08-31` (o el botón **Confirmo**
 | **Buzón** | Los 6 correos con su estado (sin analizar, por aprobar, registrado, actualizado, duplicado, rechazado). **Analizar** procesa uno (extraer → validar → registrar sin confirmación) y **Analizar todo en orden** recorre los pendientes con progreso y botón **Detener**. El detalle trae una línea de tiempo de 7 pasos, el correo y el adjunto al lado de lo extraído con confianza y evidencia por campo, la clasificación y la auditoría de `out/log.jsonl`. |
 | **Bandeja de aprobación** | Lo que espera una decisión humana (con un contador en la pestaña): campos en revisión editables, **Confirmar datos y registrar** (con correcciones) o **Rechazar** con motivo. A la derecha, las decisiones ya tomadas, aquí o en el chat: quién, cuándo, qué corrigió y qué se escribió. |
 | **Maestro CSV** | `out/sharepoint/maestro-contratos.csv` con las filas creadas o modificadas por una aprobación resaltadas, y **Descargar CSV**. |
-| **Chat** | El agente: cada llamada a herramienta (nombre, argumentos, resultado) y la burbuja resaltada cuando pide confirmación. |
+| **Chat** | El agente: cada llamada a herramienta (nombre, argumentos, resultado) y la burbuja resaltada cuando pide confirmación. Mientras trabaja, muestra en vivo qué hace el modelo y cada paso del motor. Si la respuesta cita un id, fecha o monto que no salió de ninguna herramienta, el servidor lo señala con un aviso (CA2). |
 
 El nombre del **Aprobador** (barra lateral) queda en las decisiones. Chat y bandeja comparten la misma verdad: lo que el chat deja en revisión aparece en la bandeja y lo que se aprueba en cualquiera de los dos sale de ambos.
 
@@ -63,6 +63,7 @@ Todas opcionales; ver [`.env.example`](.env.example). La clave solo vive en el b
 | `GOOGLE_API_KEY` | — | Clave de Gemini (secreto). |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Modelo de Gemini. |
 | `LLM_TIMEOUT_MS` | `60000` | Timeout por llamada al proveedor. |
+| `LLM_REINTENTOS` | `2` | Reintentos ante 429, 5xx o fallo de red (no ante timeout), con espera exponencial; máx. 5. |
 | `MAX_ITERACIONES` | `25` | Tope de iteraciones modelo → herramientas por turno (CA1). |
 | `MAX_TOKENS_SESION` | `300000` | Tope de tokens por sesión. |
 | `MAX_TOKENS_PROCESO` | `3000000` | Tope de tokens del proceso (abrir sesiones nuevas no lo evade). |
@@ -82,8 +83,8 @@ Abre <https://smith.langchain.com/studio?baseUrl=http://localhost:2024>. Es solo
 
 ```bash
 bun install && bun run demo.ts   # procesa los 6 mensajes llamando directo a las herramientas
-bun run test                     # 148 pruebas: api/tests (extracción, reglas, herramientas, motor, ciclo, guardas, HTTP, bandeja, reinicio, módulo) y studio/tests
-bun run typecheck                # api + web
+bun run test                     # 162 pruebas: api/tests (extracción, reglas, herramientas, motor, ciclo, guardas, HTTP, bandeja, reinicio, módulo) y studio/tests
+bun run typecheck                # api + web + studio
 ```
 
 `demo.ts` limpia `out/`, hace la primera pasada (msg-006 queda sin registrar por revisión), una segunda llamada con `confirmado: true` y genera `out/alertas.md`. Como `out/` es el mismo estado que usan la app y Studio, después de la demo el buzón queda procesado: para volver a probar en el chat, usa «Reiniciar demo» o el grafo `reiniciar_demo`.
@@ -93,6 +94,7 @@ bun run typecheck                # api + web
 | Método | Ruta | Cuerpo / respuesta |
 |---|---|---|
 | `POST` | `/api/chat` | `{ sessionId, message }` → `{ reply, toolCalls: [{ nombre, args, ok, resumen, pasos? }], needsConfirmation }`; `toolCalls` son las `recepcion_*` del modelo y `pasos`, las `contratos_*` que ejecutó el motor por debajo |
+| `POST` | `/api/chat/stream` | Mismo cuerpo y mismo turno, como `text/event-stream`: eventos `modelo`, `herramienta`, `paso` (cada `contratos_*` del motor), `resultado` y por último `fin` con la misma respuesta de `/api/chat`. Lo usa el chat para mostrar el progreso en vivo |
 | `GET` | `/api/sessions/:id` | Sesión completa: `turnos[]` visibles, `mensajes[]` del modelo, `tokens`, `pendientesConfirmacion[]` |
 | `GET` | `/api/health` | `{ ok: true, provider, model }` (sin claves) |
 | `GET` | `/api/maestro` | `{ filas[] }` del maestro de trabajo (`out/sharepoint/maestro-contratos.csv`) |
@@ -119,7 +121,7 @@ api/                                 backend Bun + Hono (workspace)
 │   ├── config.ts                    variables de entorno validadas con zod
 │   ├── knowledge/registro-contratos.md  conocimiento del proceso (reglas, esquema, gobierno)
 │   ├── tools/                       recepcion_* que ve el modelo (recepcion.ts), contratos_* del PRD (contratos.ts) y envoltorio común (tool.ts)
-│   ├── agent/                       ciclo ReAct de la recepcionista, guardas (confirmación, alcance, manipulación), sesiones, prompt
+│   ├── agent/                       ciclo ReAct de la recepcionista, guardas (confirmación, alcance, manipulación, respaldo de datos), sesiones, prompt
 │   ├── llm/                         adaptador (adapter.ts), Gemini, offline y fábrica
 │   ├── http/                        rutas Hono (chat en app.ts, buzón/bandeja/reinicio en hitl.ts) y tipos compartidos con el front
 │   ├── application/use-cases/       validar, registrar, alertas, estado de mensajes, vistas del buzón, línea de tiempo, reinicio

@@ -16,7 +16,7 @@ Requisito: Bun ≥ 1.2. Usa siempre `bun` (no npm, pnpm, yarn ni node).
 |---|---|
 | `bun install` | Instala dependencias de los workspaces `api/` y `web/` (un solo `bun.lock` en la raíz). |
 | `bun run dev` | Script `dev` de cada workspace: API con recarga en `:3000` + front Vite en `:5173` (proxy de `/api`). |
-| `bun run test` | 148 pruebas: `api/tests/` (`unit/` e `integration/`) y `studio/tests/`. No necesitan clave. `bun test` desde la raíz también sirve. |
+| `bun run test` | 162 pruebas: `api/tests/` (`unit/` e `integration/`) y `studio/tests/`. No necesitan clave. `bun test` desde la raíz también sirve. |
 | `bun run typecheck` | `tsc --noEmit` de `api/`, `web/` y `studio/`. |
 | `bun run demo` | `demo.ts`: procesa el buzón llamando directo a las herramientas, sin modelo. **Borra `out/`** (el estado que comparten la app y Studio) y lo deja todo procesado. |
 | `bun run sync:module` | Regenera `modulo/agent.md` y `modulo/skill/…/SKILL.md`. `--check` falla si están desactualizados. |
@@ -88,7 +88,7 @@ Prompt y conocimiento se leen en cada turno: cambiarlos no requiere reiniciar el
 
 ## Invariantes que no se rompen
 
-1. **El modelo no es fuente de valores.** Toda cifra, fecha o clasificación sale de una herramienta. El motor arma el contrato desde la extracción del servidor; el modelo solo transmite las correcciones que dictó la analista (quedan con confianza 1 y evidencia de quién las fijó) y `registrar` revalida antes de escribir.
+1. **El modelo no es fuente de valores.** Toda cifra, fecha o clasificación sale de una herramienta. El motor arma el contrato desde la extracción del servidor; el modelo solo transmite las correcciones que dictó la analista (quedan con confianza 1 y evidencia de quién las fijó) y `registrar` revalida antes de escribir. La guarda de respaldo (`api/src/agent/guardrails/grounding.ts`) señala en la respuesta todo id, fecha o monto que no aparezca en herramientas, mensajes de la analista ni prompt.
 2. **Confirmación humana (CA3) en el servidor**: `recepcion_responder_revision` solo se acepta para mensajes que el motor dejó pausados en un turno **anterior** de la misma sesión (`api/src/agent/execution.ts`). No relajes esta guarda.
 3. **Lo dudoso no se escribe**: el nodo `decidir` (`rutaTrasValidar`) manda a `esperar_revision` todo `nuevo`/`actualizacion` con `requiere_revision` no vacío, y además `contratos_registrar` sin `confirmado` falla con el prefijo `requiere revisión`.
 4. **El modelo solo ve las `recepcion_*`.** No expongas las `contratos_*` al modelo ni pongas reglas de negocio en `recepcion.ts`: el orden del proceso lo fija el motor.
