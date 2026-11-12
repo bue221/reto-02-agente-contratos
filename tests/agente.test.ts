@@ -2,6 +2,8 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { AgenteContratos, type LimitesCiclo } from "../src/agente/ciclo.ts";
 import { SesionesEnArchivo } from "../src/agente/sesiones.ts";
 import type { RespuestaChat } from "../src/api/tipos.ts";
+import type { ValidacionReportada } from "../src/casos/validar.ts";
+import { llamarHerramienta } from "../src/flujo/procesar-buzon.ts";
 import { type Resultado, exito, fallo } from "../src/dominio/resultado.ts";
 import type { LlamadaHerramienta, ProveedorLlm, RespuestaLlm } from "../src/llm/adapter.ts";
 import { ProveedorOffline } from "../src/llm/offline.ts";
@@ -84,6 +86,16 @@ describe("flujo de la demo con el proveedor offline (PRD 11)", () => {
     const sesion = await new SesionesEnArchivo(ctx.directory).obtener("demo");
     expect(sesion?.turnos.map((turno) => turno.usuario)).toEqual([PROMPT_DEMO, CONFIRMACION]);
     expect(sesion?.pendientesConfirmacion).toEqual([]);
+  });
+});
+
+describe("contrato reenviado por el modelo", () => {
+  test("acepta evidencias null y campos null omitidos, como los reenvía Gemini", async () => {
+    const ctx = await crearProyecto();
+    const { numero_otrosi: _otrosi, notas: _notas, ...contrato } = await extraerOk(ctx, "msg-003");
+    const conNulls = { ...contrato, objeto: { confianza: contrato.objeto.confianza, evidencia: null }, id_contrato: { ...contrato.id_contrato, evidencia: null } };
+    const validacion = await llamarHerramienta<ValidacionReportada>("contratos_validar", { mensaje_id: "msg-003", contrato: conNulls }, ctx);
+    expect(validacion.ok && validacion.data.clasificacion).toBe("actualizacion");
   });
 });
 
