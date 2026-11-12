@@ -106,6 +106,11 @@ describe("selección de proveedor por entorno", () => {
     expect(crearProveedor(leerConfiguracion({ GOOGLE_API_KEY: CLAVE, LLM_PROVIDER: "offline" })).nombre).toBe("offline");
   });
 
+  test("las variables vacías de .env.example toman los valores por defecto", () => {
+    const config = leerConfiguracion({ LLM_PROVIDER: "", GOOGLE_API_KEY: "", PORT: "", MAX_ITERACIONES: " " });
+    expect(config).toMatchObject({ proveedor: "offline", puerto: 3000, maxIteraciones: 25, modeloGemini: "gemini-2.5-flash" });
+  });
+
   test("gemini explícito sin clave es un error de configuración claro", () => {
     expect(() => leerConfiguracion({ LLM_PROVIDER: "gemini" })).toThrow("LLM_PROVIDER=gemini requiere GOOGLE_API_KEY");
   });

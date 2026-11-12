@@ -35,7 +35,9 @@ export interface Configuracion {
 
 /** `auto` elige Gemini si hay clave y offline si no, para que la app arranque siempre. */
 export function leerConfiguracion(entorno: Record<string, string | undefined> = process.env): Configuracion {
-  const leido = EntornoSchema.safeParse(entorno);
+  // Una variable vacía (copiada tal cual de `.env.example`) cuenta como no definida.
+  const definidas = Object.fromEntries(Object.entries(entorno).filter(([, valor]) => valor !== undefined && valor.trim() !== ""));
+  const leido = EntornoSchema.safeParse(definidas);
   if (!leido.success) {
     const detalle = leido.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
     throw new Error(`configuración inválida: ${detalle}`);
