@@ -11,7 +11,12 @@ const campoSchema = <T extends z.ZodType>(valor: T, descripcion: string) =>
       .default(null)
       .describe(`${descripcion}. null si no aparece en el documento`),
     confianza: ConfianzaSchema,
-    evidencia: z.string().optional().describe("Fragmento del documento que respalda el valor"),
+    evidencia: z
+      .string()
+      .nullish()
+      .transform((evidencia) => evidencia ?? undefined)
+      .optional()
+      .describe("Fragmento del documento que respalda el valor"),
   });
 
 export const TIPOS_DOCUMENTO = ["contrato", "otrosi", "otro"] as const;
