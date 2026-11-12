@@ -25,6 +25,9 @@ export interface Registro {
   avisos: string[];
 }
 
+/** Prefijo del error de RN5: el ciclo del agente lo usa para detectar de forma determinista que debe pedir confirmación. */
+export const PREFIJO_REQUIERE_REVISION = "requiere revisión";
+
 const describirRevisiones = (revisiones: readonly Revision[]): string =>
   revisiones.map((revision) => `${revision.campo} (${revision.motivo})`).join(", ");
 
@@ -59,7 +62,7 @@ export async function registrarMensaje(rutas: Rutas, solicitud: SolicitudRegistr
     return exito({ id_contrato: validacion.id_contrato_existente, accion: "duplicado", ruta_archivo: null, cambios: {}, avisos: validacion.avisos });
   }
   if (validacion.requiere_revision.length > 0 && !solicitud.confirmado) {
-    return fallo(`requiere revisión: ${describirRevisiones(validacion.revisiones)}. Confirme con el usuario y vuelva a llamar con confirmado = true`);
+    return fallo(`${PREFIJO_REQUIERE_REVISION}: ${describirRevisiones(validacion.revisiones)}. Confirme con el usuario y vuelva a llamar con confirmado = true`);
   }
   const construida = construirFila(campos, {
     contrato: solicitud.contrato,
