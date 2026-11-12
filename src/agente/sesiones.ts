@@ -12,6 +12,8 @@ export interface Sesion extends SesionPublica {
 export interface AlmacenSesiones {
   obtener(id: string): Promise<Sesion | null>;
   guardar(sesion: Sesion): Promise<void>;
+  /** Reinicio de la demo: olvida las sesiones en memoria (los archivos los borra quien vacía `out/`). */
+  vaciar(): void;
 }
 
 export const ID_SESION = /^[A-Za-z0-9_-]{1,64}$/;
@@ -47,6 +49,10 @@ export class SesionesEnArchivo implements AlmacenSesiones {
     } catch (error) {
       console.error(`[sesiones] no se pudo persistir ${sesion.id}: ${mensajeDeError(error)}`);
     }
+  }
+
+  vaciar(): void {
+    this.#memoria.clear();
   }
 
   async #leer(id: string): Promise<Sesion | null> {
