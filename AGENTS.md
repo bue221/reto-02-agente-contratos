@@ -16,7 +16,7 @@ Requisito: Bun ≥ 1.2. Usa siempre `bun` (no npm, pnpm, yarn ni node).
 |---|---|
 | `bun install` | Instala dependencias de los workspaces `api/` y `web/` (un solo `bun.lock` en la raíz). |
 | `bun run dev` | Script `dev` de cada workspace: API con recarga en `:3000` + front Vite en `:5173` (proxy de `/api`). |
-| `bun run test` | 103 pruebas: `api/tests/` (`unit/` e `integration/`) y `studio/tests/`. No necesitan clave. `bun test` desde la raíz también sirve. |
+| `bun run test` | 111 pruebas: `api/tests/` (`unit/` e `integration/`) y `studio/tests/`. No necesitan clave. `bun test` desde la raíz también sirve. |
 | `bun run typecheck` | `tsc --noEmit` de `api/`, `web/` y `studio/`. |
 | `bun run demo` | `demo.ts`: procesa el buzón llamando directo a las herramientas, sin modelo. |
 | `bun run sync:module` | Regenera `modulo/agent.md` y `modulo/skill/…/SKILL.md`. `--check` falla si están desactualizados. |
