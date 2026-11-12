@@ -21,7 +21,7 @@ export interface Herramienta<A extends z.ZodRawShape> {
 /** Vista sin tipos concretos para el registro y el ciclo del agente (argumentos crudos del modelo). */
 export interface HerramientaGenerica {
   description: string;
-  args: z.ZodRawShape;
+  args: Readonly<Record<string, z.ZodType>>;
   execute(args: unknown, ctx: ContextoHerramienta): Promise<string>;
 }
 
