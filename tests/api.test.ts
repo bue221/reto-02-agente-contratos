@@ -22,7 +22,7 @@ async function appDePrueba(entorno: Record<string, string> = {}): Promise<Hono> 
     cargarSistema: async () => "sistema",
     hoy: HOY,
   });
-  return crearApp({ agente, sesiones, directorio: ctx.directory });
+  return crearApp({ agente, sesiones, directorio: ctx.directory, origenesCors: config.origenesCors });
 }
 
 const postChat = (app: Hono, cuerpo: unknown): Promise<Response> =>
@@ -90,5 +90,14 @@ describe("API del chat", () => {
     const respuesta = await app.request("/api/nada");
     expect(respuesta.status).toBe(404);
     expect(((await respuesta.json()) as ErrorApi).error.codigo).toBe("ruta_no_encontrada");
+  });
+
+  test("CORS solo autoriza los orígenes configurados", async () => {
+    const conCors = await appDePrueba({ CORS_ORIGINS: "https://front.example.com" });
+    const permitido = await conCors.request("/api/health", { headers: { origin: "https://front.example.com" } });
+    const ajeno = await conCors.request("/api/health", { headers: { origin: "https://otro.example.com" } });
+    expect(permitido.headers.get("access-control-allow-origin")).toBe("https://front.example.com");
+    expect(ajeno.headers.get("access-control-allow-origin")).toBeNull();
+    expect((await app.request("/api/health", { headers: { origin: "https://front.example.com" } })).headers.get("access-control-allow-origin")).toBeNull();
   });
 });

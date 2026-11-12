@@ -16,6 +16,9 @@ export interface FilaMaestro {
   fuente: string;
 }
 
+/** Vacío en local y en la imagen única (mismo origen); en Vercel apunta al backend en AWS. */
+const BASE_API = (import.meta.env.VITE_API_URL ?? "").replace(/\/+$/, "");
+
 const esErrorApi = (cuerpo: unknown): cuerpo is ErrorApi =>
   typeof cuerpo === "object" && cuerpo !== null && "ok" in cuerpo && cuerpo.ok === false && "error" in cuerpo;
 
@@ -23,7 +26,7 @@ const esErrorApi = (cuerpo: unknown): cuerpo is ErrorApi =>
 async function pedir<T>(ruta: string, init?: RequestInit): Promise<T> {
   let respuesta: Response;
   try {
-    respuesta = await fetch(ruta, init);
+    respuesta = await fetch(`${BASE_API}${ruta}`, init);
   } catch {
     throw new Error("No se pudo contactar al backend. ¿Está corriendo?");
   }

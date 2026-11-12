@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
+import { cors } from "hono/cors";
 import { z } from "zod";
 import type { AgenteContratos } from "../agente/ciclo.ts";
 import { type AlmacenSesiones, ID_SESION, type Sesion } from "../agente/sesiones.ts";
@@ -20,6 +21,7 @@ export interface DependenciasApi {
   directorio: string;
   /** Carpeta del front compilado; si no existe, solo se expone la API. */
   webDist?: string;
+  origenesCors?: string[];
 }
 
 const MAX_LONGITUD_MENSAJE = 4000;
@@ -65,6 +67,7 @@ export function crearApp(deps: DependenciasApi): Hono {
     console.error(`[api] ${c.req.method} ${c.req.path}: ${mensajeDeError(error)}`);
     return c.json(errorApi("error_interno", "Error interno del servidor. Revisa los logs del backend."), 500);
   });
+  if (deps.origenesCors?.length) app.use("/api/*", cors({ origin: deps.origenesCors }));
   rutasDeApi(app, deps);
   if (deps.webDist) frontEstatico(app, deps.webDist);
   return app;

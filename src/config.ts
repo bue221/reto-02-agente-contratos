@@ -18,6 +18,7 @@ const EntornoSchema = z.object({
   MAX_TOKENS_SESION: entero(300_000),
   MAX_TOKENS_PROCESO: entero(3_000_000),
   PORT: entero(3000),
+  CORS_ORIGINS: textoOpcional,
 });
 
 export interface Configuracion {
@@ -29,6 +30,8 @@ export interface Configuracion {
   maxTokensSesion: number;
   maxTokensProceso: number;
   puerto: number;
+  /** Orígenes del front desplegado aparte (p. ej. Vercel). Vacío: solo mismo origen. */
+  origenesCors: string[];
   /** Raíz del proyecto: `ctx.directory` de las herramientas. */
   directorio: string;
 }
@@ -54,6 +57,7 @@ export function leerConfiguracion(entorno: Record<string, string | undefined> = 
     maxTokensSesion: e.MAX_TOKENS_SESION,
     maxTokensProceso: e.MAX_TOKENS_PROCESO,
     puerto: e.PORT,
+    origenesCors: (e.CORS_ORIGINS ?? "").split(",").map((origen) => origen.trim()).filter(Boolean),
     directorio: join(import.meta.dir, ".."),
   };
 }
