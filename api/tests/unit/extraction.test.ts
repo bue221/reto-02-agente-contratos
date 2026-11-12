@@ -4,6 +4,7 @@ import { finDePlazo } from "../../src/core/domain/dates.ts";
 import { similitud, slugCliente } from "../../src/core/domain/text.ts";
 import { extraerContrato } from "../../src/core/extraction/extractor.ts";
 import { parsearMonto } from "../../src/core/extraction/amount.ts";
+import { montoEnLetras } from "../../src/core/extraction/amount-words.ts";
 import { contratoModificado, leerFixture } from "../helpers.ts";
 
 async function extraerFixture(mensaje: string, adjunto = "contrato.txt"): Promise<Contrato> {
@@ -77,8 +78,8 @@ describe("extracción determinista de prosa legal", () => {
     expect(marco.valor).toMatchObject({ valor: 0, confianza: 0.5 });
     expect(marco.fecha_inicio).toMatchObject({ valor: "2026-08-01", confianza: 0.5 });
     expect(marco.fecha_fin).toMatchObject({ valor: "2027-08-31", confianza: 0.5 });
-    expect(marco.moneda.valor).toBe("COP");
-    expect(marco.requiere_poliza.valor).toBe(false);
+    expect(marco.moneda).toMatchObject({ valor: "COP", confianza: 0.75 });
+    expect(marco.requiere_poliza).toMatchObject({ valor: false, confianza: 0.75 });
     expect(marco.objeto.valor?.length).toBeLessThanOrEqual(200);
   });
 
@@ -86,6 +87,46 @@ describe("extracción determinista de prosa legal", () => {
     for (const mensaje of ["msg-001", "msg-002", "msg-004", "msg-006"]) {
       expect((await extraerFixture(mensaje)).nit_cliente.valor).not.toBe("900123456");
     }
+  });
+});
+
+describe("verificación cruzada del valor", () => {
+  const extraerModificado = async (cambios: Record<string, string>): Promise<Contrato> => {
+    const resultado = extraerContrato(await contratoModificado(cambios));
+    if (!resultado.ok) throw new Error(resultado.error);
+    return resultado.data;
+  };
+
+  test("los fixtures con valor en letras coinciden con su cifra y conservan confianza alta", async () => {
+    for (const [mensaje, adjunto] of [["msg-001", "contrato.txt"], ["msg-002", "contrato.txt"], ["msg-003", "otrosi.txt"], ["msg-004", "contrato.txt"]] as const) {
+      const contrato = await extraerFixture(mensaje, adjunto);
+      expect(contrato.valor.confianza).toBe(0.95);
+      expect(contrato.moneda.confianza).toBe(0.95);
+    }
+  });
+
+  test("una cifra que contradice el valor en letras baja a revisión", async () => {
+    const contrato = await extraerModificado({ "COP $265.000.000": "COP $256.000.000" });
+    expect(contrato.valor).toMatchObject({ valor: 256000000, confianza: 0.5 });
+    expect(contrato.moneda.confianza).toBe(0.95);
+    expect(contrato.notas.some((nota) => nota.includes("no coincide con el valor en letras"))).toBe(true);
+  });
+
+  test("un código de moneda que contradice el nombre en letras baja la moneda a revisión", async () => {
+    const contrato = await extraerModificado({ "COP $265.000.000": "USD 265.000.000" });
+    expect(contrato.moneda).toMatchObject({ valor: "USD", confianza: 0.5 });
+    expect(contrato.valor.confianza).toBe(0.95);
+  });
+
+  test("varias cifras distintas en la cláusula de valor dejan el total en revisión", async () => {
+    const contrato = await extraerModificado({ "IVA incluido": "IVA incluido, pagadero en dos cuotas de COP $132.500.000" });
+    expect(contrato.valor).toMatchObject({ valor: 265000000, confianza: 0.6 });
+    expect(contrato.notas.some((nota) => nota.includes("2 cifras distintas"))).toBe(true);
+  });
+
+  test("un id de contrato sin «No.» queda por debajo del umbral", async () => {
+    const contrato = await extraerModificado({ "No. CT-2026-015": "CT-2026-015" });
+    expect(contrato.id_contrato).toMatchObject({ valor: "CT-2026-015", confianza: 0.75 });
   });
 });
 
@@ -111,6 +152,15 @@ describe("utilidades", () => {
     expect(parsearMonto("265.000.000")).toBe(265000000);
     expect(parsearMonto("120,000.00")).toBe(120000);
     expect(parsearMonto("1.234,5")).toBe(1234.5);
+  });
+
+  test("montos en letras con su moneda", () => {
+    expect(montoEnLetras("DOSCIENTOS SESENTA Y CINCO MILLONES DE PESOS M/CTE")).toMatchObject({ monto: 265000000, moneda: "COP" });
+    expect(montoEnLetras("CIENTO VEINTE MIL DÓLARES DE LOS ESTADOS UNIDOS")).toMatchObject({ monto: 120000, moneda: "USD" });
+    expect(montoEnLetras("QUINIENTOS VEINTE MIL SOLES")).toMatchObject({ monto: 520000, moneda: "PEN" });
+    expect(montoEnLetras("un millón doscientos mil lempiras")).toMatchObject({ monto: 1200000, moneda: "HNL" });
+    expect(montoEnLetras("dos mil quinientos millones de pesos")).toMatchObject({ monto: 2500000000, moneda: "COP" });
+    expect(montoEnLetras("en tres cuotas y el diez por ciento")).toBeNull();
   });
 
   test("fin de plazo en meses es inclusivo", () => {

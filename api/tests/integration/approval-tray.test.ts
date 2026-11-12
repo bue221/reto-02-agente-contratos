@@ -17,7 +17,7 @@ import type {
 } from "../../src/http/types.ts";
 import type { ProveedorLlm } from "../../src/llm/adapter.ts";
 import { ProveedorOffline } from "../../src/llm/offline.ts";
-import { HOY, crearProyecto, leerSalida, lineasJson } from "../helpers.ts";
+import { HOY, REVISION_006, crearProyecto, leerSalida, lineasJson } from "../helpers.ts";
 
 const PROMPT_DEMO = "Procesa el buzón de contratos con fecha de hoy 2026-09-03. No registres nada dudoso sin preguntarme.";
 const CONFIRMACION = "confirmo el valor 0 y la fecha fin 2027-08-31";
@@ -121,7 +121,7 @@ describe("bandeja de aprobación (HITL)", () => {
     expect(procesado.json.mensaje.estado).toBe("requiere_revision");
     const { json } = await pedir<RespuestaBandeja>(app, "/api/bandeja");
     expect(json.pendientes.map((item) => item.mensaje.id)).toEqual(["msg-006"]);
-    expect(json.pendientes[0]?.validacion.requiere_revision).toEqual(["valor", "fecha_inicio", "fecha_fin"]);
+    expect(json.pendientes[0]?.validacion.requiere_revision).toEqual(REVISION_006);
     expect(json.pendientes[0]?.contrato.valor.confianza).toBeLessThan(0.8);
   });
 

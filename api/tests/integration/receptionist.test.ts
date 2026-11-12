@@ -6,7 +6,7 @@ import type { Resultado } from "../../src/core/domain/result.ts";
 import type { LlamadaVisible, RespuestaBuzon } from "../../src/http/types.ts";
 import { type DecisionReportada, type PasadaReportada, ejecutarHerramienta } from "../../src/tools/recepcion.ts";
 import type { ContextoHerramienta } from "../../src/tools/tool.ts";
-import { HOY, crearProyecto } from "../helpers.ts";
+import { HOY, REVISION_006, crearProyecto } from "../helpers.ts";
 
 /** Llama a una herramienta de la recepcionista como lo hace el ciclo: con traza para ver lo que hizo el motor. */
 async function recepcion<T>(ctx: ContextoHerramienta, nombre: string, args: Record<string, unknown>): Promise<{ resultado: Resultado<T>; pasos: LlamadaVisible[] }> {
@@ -57,7 +57,7 @@ describe("recepcion_procesar_buzon: el motor determinista", () => {
 
   test("lo pausado trae el detalle campo por campo con evidencia y el reporte de alertas sale al final", () => {
     const revision = pasada.mensajes.find((mensaje) => mensaje.mensaje_id === "msg-006")?.revision ?? [];
-    expect(revision.map((campo) => campo.campo)).toEqual(["valor", "fecha_inicio", "fecha_fin"]);
+    expect(revision.map((campo) => campo.campo)).toEqual(REVISION_006);
     expect(revision.every((campo) => campo.confianza < 0.8)).toBe(true);
     expect(pasos[0]?.nombre).toBe("contratos_leer_buzon");
     expect(pasos.at(-1)?.nombre).toBe("contratos_alertas");
@@ -110,7 +110,7 @@ describe("herramientas de lectura de la recepcionista", () => {
   test("explicar_validacion da los motivos de revisión de un mensaje analizado", async () => {
     const explicado = datos((await recepcion<ExplicacionMensaje>(ctx, "recepcion_explicar_validacion", { mensaje_id: "msg-006" })).resultado);
     expect(explicado.mensaje.estado).toBe("requiere_revision");
-    expect(explicado.validacion?.requiere_revision).toEqual(["valor", "fecha_inicio", "fecha_fin"]);
+    expect(explicado.validacion?.requiere_revision).toEqual(REVISION_006);
     expect(explicado.extraccion?.valor.confianza).toBeLessThan(0.8);
     expect(explicado).not.toHaveProperty("adjuntos");
   });

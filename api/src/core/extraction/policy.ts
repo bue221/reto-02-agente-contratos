@@ -33,7 +33,7 @@ export function extraerPoliza(clausula: Clausula | null, esOtrosi: boolean, nota
     notas.push(
       `Garantía condicional (${tipos.join(";") || "sin tipo"}) exigida por orden de servicio, no por el contrato: se registra requiere_poliza = false y cada orden se evalúa al llegar.`,
     );
-    return { requiere_poliza: encontrado(false, 0.8, clausula.cuerpo), tipo_poliza: encontrado("", 0.8) };
+    return { requiere_poliza: encontrado(false, 0.75, clausula.cuerpo), tipo_poliza: encontrado("", 0.75) };
   }
   if (tipos.length === 0) {
     notas.push("La cláusula de garantías no nombra el tipo de póliza.");

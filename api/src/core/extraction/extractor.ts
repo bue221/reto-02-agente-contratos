@@ -16,7 +16,7 @@ function extraerIdContrato(documento: Documento): Campo<string> {
   const conNumero = PATRON_ID_CON_NUMERO.exec(documento.texto);
   if (conNumero?.[1]) return encontrado(conNumero[1], 0.95, conNumero[0]);
   const suelto = PATRON_ID.exec(documento.texto);
-  return suelto?.[1] ? encontrado(suelto[1], 0.8, suelto[0]) : ausente();
+  return suelto?.[1] ? encontrado(suelto[1], 0.75, suelto[0]) : ausente();
 }
 
 function extraerObjeto(documento: Documento, notas: string[]): Campo<string> {

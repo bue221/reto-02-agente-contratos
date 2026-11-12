@@ -8,7 +8,7 @@ import { type Resultado, exito, fallo } from "../../src/core/domain/result.ts";
 import type { DefinicionHerramienta, LlamadaHerramienta, ProveedorLlm, RespuestaLlm } from "../../src/llm/adapter.ts";
 import { ProveedorOffline } from "../../src/llm/offline.ts";
 import type { ContextoHerramienta } from "../../src/tools/tool.ts";
-import { HOY, crearProyecto, extraerOk, leerSalida, lineasJson } from "../helpers.ts";
+import { HOY, REVISION_006, crearProyecto, extraerOk, leerSalida, lineasJson } from "../helpers.ts";
 
 const PROMPT_DEMO =
   "Procesa el buzón de contratos con fecha de hoy 2026-09-03. Registra lo que esté limpio, muéstrame lo que requiere revisión campo por campo y termina con el reporte de alertas. No registres nada dudoso sin preguntarme.";
@@ -67,7 +67,7 @@ describe("flujo de la demo con el proveedor offline (PRD 11)", () => {
     expect(nombres(pasos(primera))).toEqual(["contratos_leer_buzon", "contratos_extraer", "contratos_validar", "contratos_registrar", "contratos_alertas"]);
     expect(primera.needsConfirmation).toBe(true);
     expect(primera.reply.trim().endsWith("?")).toBe(true);
-    expect(primera.reply).toContain("| msg-006 | nuevo | valor, fecha_inicio, fecha_fin |");
+    expect(primera.reply).toContain(`| msg-006 | nuevo | ${REVISION_006.join(", ")} |`);
     expect(primera.reply).toContain("CT-2026-009 (27 d)");
   });
 

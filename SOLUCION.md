@@ -90,11 +90,11 @@ Determinista sobre `contrato.txt` (`api/src/core/extraction/`), sin modelo:
 
 1. **Segmentación**: encabezado, preámbulo, cláusulas (`PRIMERA — OBJETO`, …) y bloque de firmas. **Tipo**: contrato, otrosí u otro (cotización → rechazo RN4).
 2. **Partes**: el cliente es la parte rotulada «EL CONTRATANTE» distinta de Periferia (NIT 900123456); la razón social se toma del preámbulo y se busca su forma en el bloque de firmas. NIT sin puntos ni DV (`890.900.111-4` → `890900111`). **País** por tipo de identificador (NIT→CO, RTN→HN, RUC 13→EC, RUC 11→PE) cruzado con el domicilio.
-3. **Valor y moneda**: cláusula VALOR; formatos `265.000.000` y `120,000.00`; código ISO explícito. `$` sin código → COP con confianza 0.6. "Por demanda" → `valor = 0`, `valor_indeterminado = true`, confianza 0.5. Moneda fuera de COP/USD/PEN/PAB/HNL → error legible.
+3. **Valor y moneda**: cláusula VALOR; formatos `265.000.000` y `120,000.00`; código ISO explícito. `$` sin código → COP con confianza 0.6. "Por demanda" → `valor = 0`, `valor_indeterminado = true`, confianza 0.5. Moneda fuera de COP/USD/PEN/PAB/HNL → error legible. **Verificación cruzada**: la cifra se contrasta con el valor en letras ("DOSCIENTOS SESENTA Y CINCO MILLONES DE PESOS"); si la cifra o la moneda lo contradicen, ese campo baja a 0.5. Si la cláusula cita varias cifras distintas (cuotas, anticipo, IVA aparte), el valor baja a 0.6 porque la primera puede no ser el total.
 4. **Plazo**: fechas en prosa leídas de la cifra entre paréntesis (`primero (1) de agosto de 2026`); plazo en meses → fin inclusivo (`inicio + N meses − 1 día`); si rango y meses no cuadran, `fecha_fin` baja a 0.6; firma solo con mes → inicio día 1 y fin último día del mes N, ambos 0.5.
-5. **Póliza**: cláusula de garantías/pólizas; tipos normalizados separados por `;`; garantía condicional por orden de servicio → `requiere_poliza = false` (0.8) con nota.
+5. **Póliza**: cláusula de garantías/pólizas; tipos normalizados separados por `;`; garantía condicional por orden de servicio → `requiere_poliza = false` (0.75) con nota.
 
-**Confianza**: niveles fijos por fuerza de la evidencia, no probabilidades: 0.95 explícito y consistente; 0.85–0.9 derivado (fin por meses, objeto truncado); 0.8 tomado de otra cláusula; 0.5–0.6 ambiguo o contradictorio; `null`/0 si no aparece. Umbral **0.8** (RN5). Cada campo trae `evidencia` (el fragmento literal).
+**Confianza**: niveles fijos por fuerza de la evidencia, no probabilidades: 0.95 explícito y consistente; 0.85–0.9 derivado (fin por meses, objeto truncado); 0.75 inferido (tomado de otra cláusula, interpretación de una garantía condicional, id sin «No.»); 0.5–0.6 ambiguo o contradictorio; `null`/0 si no aparece. Umbral **0.8** (RN5): ningún nivel cae justo en el umbral, así que toda inferencia pasa por revisión humana. Cada campo trae `evidencia` (el fragmento literal).
 
 **Dónde entra el modelo**: decide cuándo consultar y cuándo encender o reanudar el motor, presenta resultados, pregunta y traduce la respuesta de la analista a `recepcion_responder_revision` con sus correcciones. **Dónde no**: no extrae, no clasifica, no elige el camino de un contrato, no calcula alertas ni escribe archivos. Las correcciones que transmite pasan por `contratos_registrar`, que reextrae el documento en el servidor y vuelve a validar antes de escribir.
 
@@ -140,8 +140,8 @@ Determinista sobre `contrato.txt` (`api/src/core/extraction/`), sin modelo:
 4. Fechas en prosa: se usa la cifra entre paréntesis. Una fecha imposible o un mes desconocido es un error legible, no un `null`.
 5. Plazo de N meses: fin inclusivo (`inicio + N meses − 1 día`). Si rango y meses no cuadran, `fecha_fin` baja a 0.6.
 6. msg-006 (firma solo con mes): inicio = día 1 del mes de firma, fin = último día del mes N (`2027-08-31`), ambos 0.5. Coincide con la confirmación del PRD.
-7. Valor por demanda: `valor = 0`, `valor_indeterminado = true`, confianza 0.5; la moneda se toma de otra cláusula que cite un código (0.8).
-8. Garantía condicional por orden de servicio (msg-006): `requiere_poliza = false` (0.8) con nota; cada orden se evaluará al llegar. Descartado: `true` + `pendiente`, que generaría una alerta de una póliza que hoy nadie puede constituir.
+7. Valor por demanda: `valor = 0`, `valor_indeterminado = true`, confianza 0.5; la moneda se toma de otra cláusula que cite un código (0.75, a confirmar).
+8. Garantía condicional por orden de servicio (msg-006): `requiere_poliza = false` (0.75, a confirmar) con nota; cada orden se evaluará al llegar. Descartado: `true` + `pendiente`, que generaría una alerta de una póliza que hoy nadie puede constituir.
 9. Objeto: texto literal de la cláusula, truncado en palabra a 200 caracteres (0.85 si se trunca); no se resume.
 10. Moneda desconocida: un código de 3 letras fuera de COP/USD/PEN/PAB/HNL delante de una cifra en la cláusula de valor es error (salvo siglas como IVA/NIT/RUC).
 

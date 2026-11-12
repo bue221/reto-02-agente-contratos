@@ -1,12 +1,14 @@
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Contrato } from "../src/core/domain/contract.ts";
+import type { CampoContrato, Contrato } from "../src/core/domain/contract.ts";
 import { llamarHerramienta } from "../src/application/workflows/tool-call.ts";
 import type { ContextoHerramienta } from "../src/tools/tool.ts";
 
 export const RAIZ = join(import.meta.dir, "..", "..");
 export const HOY = "2026-09-03";
+/** Por demanda, firma sin día, moneda inferida de la cláusula de garantías y póliza condicional. */
+export const REVISION_006: CampoContrato[] = ["valor", "moneda", "fecha_inicio", "fecha_fin", "requiere_poliza", "tipo_poliza"];
 
 /** Copia archivo por archivo (el fixture es de solo lectura y `cp` conservaría esos permisos). */
 async function copiarCarpeta(origen: string, destino: string): Promise<void> {

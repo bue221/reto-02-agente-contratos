@@ -60,7 +60,8 @@ Cada mensaje procesado trae su `recorrido` (los nodos que visitó) y su `desenla
 - El cliente es la parte rotulada «EL CONTRATANTE» distinta de Periferia (NIT 900123456).
 - Las fechas en prosa se leen de la cifra entre paréntesis; un plazo de N meses termina el día anterior al mismo día N meses después.
 - Un contrato firmado solo con mes y año toma el día 1 como inicio y el último día del mes N como fin, ambos con confianza 0.5: siempre requiere confirmación.
-- Valor por demanda: `valor = 0`, `valor_indeterminado = true`, confianza 0.5.
+- Valor por demanda: `valor = 0`, `valor_indeterminado = true`, confianza 0.5; la moneda inferida de otra cláusula y una garantía condicional (`requiere_poliza = false`) quedan en 0.75: también se confirman.
+- La cifra del valor se contrasta con el valor en letras: si no coinciden, el valor (o la moneda) queda en revisión. Varias cifras distintas en la cláusula de valor también lo dejan en revisión.
 - Un otrosí trae solo los campos que modifica; el resto se hereda del maestro. Si amplía el plazo de un contrato con póliza, la póliza vuelve a `pendiente`.
 - Un otrosí de un contrato que no está en el maestro se rechaza: primero debe registrarse el original.
 
