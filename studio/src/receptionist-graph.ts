@@ -3,6 +3,7 @@ import { type BaseCheckpointSaver, END, type LangGraphRunnableConfig, MessagesZo
 import { z } from "zod/v3";
 import { ejecutarLlamada } from "../../api/src/agent/execution.ts";
 import { auditarBloqueo } from "../../api/src/agent/guardrails/audit.ts";
+import { revisarRespaldo } from "../../api/src/agent/guardrails/grounding.ts";
 import { respuestaDeBloqueo, revisarEntrada } from "../../api/src/agent/guardrails/input-guard.ts";
 import { conCanario, nuevoCanario, revisarSalida } from "../../api/src/agent/guardrails/output-guard.ts";
 import { definicionesParaModelo } from "../../api/src/agent/model-tools.ts";
@@ -17,7 +18,7 @@ import { type DependenciasStudio, dependenciasPorEntorno } from "./project.ts";
 /**
  * La recepcionista como grafo de LangGraph, para verla en Studio: el mismo ReAct que `api/src/agent/loop.ts`,
  * con el mismo prompt, el mismo `ProveedorLlm`, las mismas cinco herramientas `recepcion_*`, las mismas guardas
- * de entrada y salida y la misma guarda CA3.
+ * de entrada, salida y respaldo (CA2) y la misma guarda CA3.
  * Cuando el modelo llama a `recepcion_procesar_buzon`, la pasada del motor corre como subgrafo `motor` de `herramientas`.
  *
  *   __start__ ─▶ guarda_entrada ─▶ recepcionista ⇄ herramientas ─(recepcion_procesar_buzon)─▶ [motor]
@@ -97,6 +98,14 @@ export function crearGrafoRecepcion(deps: DependenciasStudio) {
     return { ...turno, pendientes, messages: [respuesta] };
   }
 
+  /** CA2, igual que el ciclo propio: fuentes = prompt, mensajes de la analista y resultados de herramientas. */
+  async function conRespaldo(mensajes: readonly BaseMessage[], sistema: string, texto: string, hilo: string): Promise<string> {
+    const fuentes = [sistema, ...mensajes.filter((mensaje) => isHumanMessage(mensaje) || isToolMessage(mensaje)).map((mensaje) => textoDe(mensaje.content))];
+    const revisado = revisarRespaldo(texto, fuentes);
+    if (revisado.sinRespaldo.length > 0) await auditarBloqueo(deps.directorio, ctxDe(hilo).sessionId, "guarda_respaldo", `datos sin respaldo: ${revisado.sinRespaldo.join(", ")}`);
+    return revisado.texto;
+  }
+
   async function recepcionista(crudo: z.input<typeof EstadoRecepcion>, config: LangGraphRunnableConfig): Promise<Actualizacion> {
     const estado = leerEstado(crudo);
     const hilo = hiloDe(config);
@@ -106,7 +115,7 @@ export function crearGrafoRecepcion(deps: DependenciasStudio) {
     const respuesta = await deps.proveedor.enviar([{ rol: "sistema", texto: sistema }, ...aMensajesLlm(estado.messages)], definiciones);
     if (!respuesta.ok) return responder(turno, errorDeProveedor(deps.proveedor, respuesta.error), hilo);
     const { texto, llamadas } = respuesta.data;
-    if (llamadas.length === 0) return responder(turno, texto.trim() || "(el modelo no devolvió texto)", hilo);
+    if (llamadas.length === 0) return responder(turno, await conRespaldo(estado.messages, sistema, texto.trim() || "(el modelo no devolvió texto)", hilo), hilo);
     const pide = new AIMessage({
       content: texto,
       tool_calls: llamadas.map((llamada) => ({ id: llamada.id, name: llamada.nombre, args: llamada.args, type: "tool_call" as const })),

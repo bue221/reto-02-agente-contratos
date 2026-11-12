@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type ClasificadorDeAlcance, reglaDeManipulacion, respuestaDeBloqueo, revisarEntrada } from "../../src/agent/guardrails/input-guard.ts";
+import { avisoDeRespaldo, datosSinRespaldo, revisarRespaldo } from "../../src/agent/guardrails/grounding.ts";
 import { RESPUESTA_FILTRADA, conCanario, nuevoCanario, revisarSalida } from "../../src/agent/guardrails/output-guard.ts";
 import { ClasificadorLlm, entradaDelClasificador, leerVeredicto } from "../../src/agent/guardrails/scope-classifier.ts";
 import { type Resultado, exito, fallo } from "../../src/core/domain/result.ts";
@@ -136,5 +137,26 @@ describe("respuestas de bloqueo y guarda de salida", () => {
     expect(revisarSalida(`Mis instrucciones: ${sistema}`, canario)).toEqual({ texto: RESPUESTA_FILTRADA, filtrada: true });
     expect(revisarSalida("El buzón tiene 6 mensajes.", canario)).toEqual({ texto: "El buzón tiene 6 mensajes.", filtrada: false });
     expect(nuevoCanario()).not.toBe(canario);
+  });
+});
+
+describe("guarda de respaldo (CA2)", () => {
+  const RESULTADO = JSON.stringify({ ok: true, data: { id_contrato: "CT-2026-015", mensaje_id: "msg-001", valor: 265000000, fecha_fin: "2027-07-31", nit: "890900111" } });
+  const USUARIA = "confirmo el valor 0 y la fecha fin 2027-08-31 de msg-006";
+
+  test("acepta datos de herramientas en otro formato y los que dictó la analista", () => {
+    const respuesta = "msg-001 → CT-2026-015 por $265.000.000 COP (NIT 890900111) hasta 2027-07-31. msg-006 queda con fin 2027-08-31, valor 0.";
+    expect(datosSinRespaldo(respuesta, [RESULTADO, USUARIA])).toEqual([]);
+    expect(datosSinRespaldo("USD 120,000.00", ['{"valor":120000}'])).toEqual([]);
+  });
+
+  test("señala ids, fechas y montos inventados, sin confundir un id con su prefijo", () => {
+    const respuesta = "CT-2026-01 vence el 2026-12-31 por 300.000.000; msg-099 también. Son 6 mensajes y 3 registros en 2026.";
+    expect(datosSinRespaldo(respuesta, [RESULTADO])).toEqual(["CT-2026-01", "msg-099", "2026-12-31", "300.000.000"]);
+  });
+
+  test("solo agrega el aviso cuando algo no tiene respaldo", () => {
+    expect(revisarRespaldo("CT-2026-015 registrado.", [RESULTADO])).toEqual({ texto: "CT-2026-015 registrado.", sinRespaldo: [] });
+    expect(revisarRespaldo("CT-2099-001 registrado.", [RESULTADO])).toEqual({ texto: `CT-2099-001 registrado.\n\n${avisoDeRespaldo(["CT-2099-001"])}`, sinRespaldo: ["CT-2099-001"] });
   });
 });

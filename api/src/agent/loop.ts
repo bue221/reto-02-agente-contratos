@@ -4,6 +4,7 @@ import { type DefinicionHerramienta, type MensajeLlm, type ProveedorLlm, type Re
 import type { ContextoHerramienta } from "../tools/tool.ts";
 import { ejecutarLlamada } from "./execution.ts";
 import { auditarBloqueo } from "./guardrails/audit.ts";
+import { revisarRespaldo } from "./guardrails/grounding.ts";
 import { type ClasificadorDeAlcance, respuestaDeBloqueo, revisarEntrada } from "./guardrails/input-guard.ts";
 import { conCanario, nuevoCanario, revisarSalida } from "./guardrails/output-guard.ts";
 import { definicionesParaModelo } from "./model-tools.ts";
@@ -127,11 +128,19 @@ export class AgenteContratos {
       const respuesta = await this.#deps.proveedor.enviar([{ rol: "sistema", texto: sistema }, ...turno.sesion.mensajes], this.#definiciones);
       if (!respuesta.ok) return errorDeProveedor(this.#deps.proveedor, respuesta.error);
       this.#contarTokens(turno.sesion, respuesta.data.uso);
-      if (respuesta.data.llamadas.length === 0) return respuesta.data.texto.trim() || "(el modelo no devolvió texto)";
+      if (respuesta.data.llamadas.length === 0) return this.#conRespaldo(turno, sistema, respuesta.data.texto.trim() || "(el modelo no devolvió texto)");
       ultimoTexto = respuesta.data.texto.trim() || ultimoTexto;
       await this.#ejecutarLlamadas(turno, respuesta.data);
     }
     return mensajeDeTope(maxIteraciones, turno.llamadas, ultimoTexto);
+  }
+
+  /** CA2: lo que el modelo afirma debe salir de herramientas, de la analista o del prompt; sus respuestas previas no cuentan. */
+  async #conRespaldo(turno: Turno, sistema: string, texto: string): Promise<string> {
+    const fuentes = [sistema, ...turno.sesion.mensajes.flatMap((mensaje) => (mensaje.rol === "usuario" ? [mensaje.texto] : mensaje.rol === "herramienta" ? [mensaje.resultado] : []))];
+    const revisado = revisarRespaldo(texto, fuentes);
+    if (revisado.sinRespaldo.length > 0) await auditarBloqueo(this.#deps.directorio, turno.sesion.id, "guarda_respaldo", `datos sin respaldo: ${revisado.sinRespaldo.join(", ")}`);
+    return revisado.texto;
   }
 
   async #ejecutarLlamadas(turno: Turno, respuesta: RespuestaLlm): Promise<void> {

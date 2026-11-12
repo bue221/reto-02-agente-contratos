@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { ClasificadorDeAlcance } from "../../src/agent/guardrails/input-guard.ts";
+import { avisoDeRespaldo } from "../../src/agent/guardrails/grounding.ts";
 import { RESPUESTA_FILTRADA } from "../../src/agent/guardrails/output-guard.ts";
 import { AgenteContratos, type LimitesCiclo } from "../../src/agent/loop.ts";
 import { SesionesEnArchivo } from "../../src/agent/sessions.ts";
@@ -77,6 +78,11 @@ describe("flujo de la demo con el proveedor offline (PRD 11)", () => {
     expect(primera.reply.trim().endsWith("?")).toBe(true);
     expect(primera.reply).toContain(`| msg-006 | nuevo | ${REVISION_006.join(", ")} |`);
     expect(primera.reply).toContain("CT-2026-009 (27 d)");
+  });
+
+  test("CA2: todo lo que afirma el guion sale de herramientas, así que la guarda de respaldo no interviene", () => {
+    expect(primera.reply).not.toContain("Verificación del servidor");
+    expect(segunda.reply).not.toContain("Verificación del servidor");
   });
 
   test("msg-006 se pausa en el motor: ni siquiera se intenta registrar en la primera pasada", () => {
@@ -289,5 +295,18 @@ describe("guardas en el servidor", () => {
     const respuesta = await crearAgente(ctx, eco).conversar("g3", "¿qué puedes hacer?");
     expect(respuesta.reply).toBe(RESPUESTA_FILTRADA);
     expect(lineasJson(await leerSalida(ctx, "log.jsonl"))).toEqual([expect.objectContaining({ herramienta: "guarda_salida", ok: false })]);
+  });
+
+  test("CA2: un id o un monto que no salió de una herramienta se señala en la respuesta y en el log", async () => {
+    const ctx = await crearProyecto();
+    const proveedor = proveedorFijo((llamada) =>
+      llamada === 1
+        ? pedir({ id: "1", nombre: "recepcion_consultar_maestro", args: { consulta: "CT-2026-009" } })
+        : texto("CT-2026-009 está en el maestro. También existe CT-2099-001 por 999.999.999 COP."),
+    );
+    const respuesta = await crearAgente(ctx, proveedor).conversar("g4", "¿qué contratos hay de CT-2026-009?");
+    expect(respuesta.reply).toEndWith(avisoDeRespaldo(["CT-2099-001", "999.999.999"]));
+    const log = lineasJson(await leerSalida(ctx, "log.jsonl"));
+    expect(log.at(-1)).toMatchObject({ herramienta: "guarda_respaldo", ok: false, resumen: "sesión g4: datos sin respaldo: CT-2099-001, 999.999.999" });
   });
 });
