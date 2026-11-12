@@ -49,7 +49,9 @@ Carpetas y archivos están en inglés; identificadores, campos y textos siguen e
 | línea de tiempo | `timeline.ts` |
 | reinicio | `reset-demo.ts` |
 | flujo, orquestación | `api/src/application/workflows/` |
-| procesar buzón / bandeja | `process-mailbox.ts` / `approval-tray.ts` |
+| motor determinista / grafo de un mensaje | `application/workflows/` / `contract-graph.ts` |
+| pasada del buzón / reanudación tras la pausa | `process-mailbox.ts` / `approval-tray.ts` |
+| recepcionista (herramientas del chat) | `tools/recepcion.ts` |
 | dominio | `api/src/core/domain/` |
 | contrato / maestro / parámetros / resultado / fechas / texto | `contract.ts` / `master.ts` / `parameters.ts` / `result.ts` / `dates.ts` / `text.ts` |
 | extracción | `api/src/core/extraction/` |

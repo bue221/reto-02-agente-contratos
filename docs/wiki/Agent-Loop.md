@@ -2,6 +2,8 @@
 
 Código: `api/src/agent/loop.ts` (`AgenteContratos`), `api/src/agent/execution.ts` (guarda de confirmación), `api/src/agent/sessions.ts`, `api/src/agent/prompt.ts`, `api/src/agent/model-tools.ts`.
 
+El ciclo es un **ReAct de la recepcionista**: el modelo solo ve las cinco herramientas `recepcion_*` y decide cuándo consultar, cuándo encender el motor y cuándo reanudarlo. El camino de cada contrato (extraer → validar → decidir → registrar / pausar / cerrar → alertas) lo fija el motor determinista; ver [Arquitectura → Dos grafos](Architecture.md#dos-grafos-la-recepcionista-y-el-motor).
+
 ## Un turno
 
 ```mermaid
@@ -11,7 +13,8 @@ sequenceDiagram
   participant S as Sesiones
   participant P as ProveedorLlm
   participant E as ejecutarLlamada
-  participant T as Herramientas
+  participant T as recepcion_*
+  participant M as Motor (contratos_*)
 
   API->>A: conversar(sessionId, mensaje)
   A->>A: cerrojo por sesión
@@ -26,10 +29,14 @@ sequenceDiagram
     else con llamadas
       P-->>A: llamadas a herramientas
       A->>E: cada llamada
-      E->>E: guarda CA3 (confirmado sin pregunta previa → error)
-      E->>T: ejecutarHerramienta(nombre, args, ctx)
+      E->>E: guarda CA3 (decisión sin pregunta previa → error)
+      E->>T: ejecutarHerramienta(nombre, args, ctx + traza)
+      opt procesar_buzon / responder_revision
+        T->>M: pasada o reanudación determinista
+        M-->>T: resultado + llamadas en traza
+      end
       T-->>E: JSON { ok, data | error }
-      E-->>A: resultado + efecto en pendientes
+      E-->>A: resultado, pasos del motor y efecto en pendientes
     end
   end
   A->>A: cerrar turno: needsConfirmation, pregunta explícita
@@ -50,27 +57,24 @@ Pasos en código (`#turno` → `#resolver` → `#ejecutarLlamadas` → `#cerrarT
 | Regla | Cómo se cumple | Dónde |
 |---|---|---|
 | **CA1** tope de iteraciones | `MAX_ITERACIONES` (25) llamadas al modelo por turno. Al agotarse, responde con lo hecho (cada llamada con su resumen), lo que falta e invita a «continúa». | `loop.ts` `mensajeDeTope` |
-| **CA2** no afirmar sin herramienta | El prompt lo prohíbe; el diseño lo hace innecesario: el modelo no extrae ni clasifica, y `validar`/`registrar` reextraen en el servidor. | `agent/prompt.md`, `use-cases/validate.ts` |
-| **CA3** confirmación humana | Detección determinista por resultados de herramientas + guarda en el servidor + pregunta forzada (ver abajo). | `execution.ts`, `loop.ts` |
-| **CA4** llamadas visibles | Cada llamada va en `toolCalls` (nombre, args, ok, resumen), en el historial de la sesión y en `out/log.jsonl`. | `execution.ts`, `tools/tool.ts` |
+| **CA2** no afirmar sin herramienta | El prompt lo prohíbe; el diseño lo hace innecesario: el modelo no extrae, no clasifica ni elige el camino, y `validar`/`registrar` reextraen en el servidor. | `agent/prompt.md`, `workflows/contract-graph.ts` |
+| **CA3** confirmación humana | La pausa la decide el motor + guarda en el servidor + pregunta forzada (ver abajo). | `execution.ts`, `loop.ts` |
+| **CA4** llamadas visibles | Cada llamada va en `toolCalls` (nombre, args, ok, resumen) con las `contratos_*` del motor en `pasos`, en el historial de la sesión y en `out/log.jsonl`. | `execution.ts`, `workflows/tool-call.ts`, `tools/tool.ts` |
 | **CA5** errores legibles | Error del proveedor o interno → `reply` en lenguaje claro; la sesión sigue. `conversar` nunca lanza. | `loop.ts` `errorDeProveedor` |
 
 ## Confirmación humana (CA3)
 
-Un mensaje queda **pendiente de confirmación** cuando:
+Un mensaje queda **pendiente de confirmación** cuando el motor lo deja en el nodo `esperar_revision`: `recepcion_procesar_buzon` lo devuelve en `en_revision`. El modelo no decide la pausa: la decide `rutaTrasValidar` (y, por defensa, `contratos_registrar` si al revalidar encuentra dudas).
 
-- `contratos_validar` devuelve `nuevo`/`actualizacion` con `requiere_revision` no vacío, o
-- `contratos_registrar` falla con un error que empieza por `requiere revisión` (`PREFIJO_REQUIERE_REVISION`).
+Sale de pendientes cuando `recepcion_responder_revision` tiene éxito (aprobado o rechazado), o cuando el mensaje ya aparece cerrado en `out/procesados.json` (por ejemplo, aprobado en la bandeja).
 
-Sale de pendientes cuando `contratos_registrar` tiene éxito.
-
-**Guarda en el servidor** (`confirmacionNoAutorizada` en `execution.ts`): `contratos_registrar` con `confirmado: true` solo se ejecuta si el mensaje estaba pendiente **al inicio del turno**. Si el modelo intenta autoconfirmar en el mismo turno en que detectó la duda, recibe:
+**Guarda en el servidor** (`decisionNoAutorizada` en `execution.ts`): `recepcion_responder_revision` solo se ejecuta si el mensaje estaba pendiente **al inicio del turno** en esta sesión. Si el modelo intenta aprobar o rechazar en el mismo turno en que el motor pausó el mensaje, o sobre un mensaje por el que nunca preguntó, recibe:
 
 ```
-confirmación no autorizada para msg-006: el usuario aún no ha confirmado. Muéstrale los campos en revisión, pregúntale y termina el turno.
+decisión no autorizada para msg-006: la analista aún no ha respondido. Muéstrale los campos en revisión, pregúntale y termina el turno.
 ```
 
-La excepción es un mensaje ya cerrado: pasa a `registrar`, que responde «ya fue procesado» en lugar de registrar dos veces.
+La excepción es un mensaje ya cerrado: pasa a la reanudación, que responde «ya fue procesado» en lugar de registrar dos veces. Además, el modelo no puede llamar a `contratos_registrar` con `confirmado: true` por su cuenta: esa herramienta no está en su conjunto.
 
 **Pregunta forzada**: si el turno deja pendientes nuevos y el texto del modelo no termina en `?`, el ciclo agrega:
 
@@ -78,7 +82,7 @@ La excepción es un mensaje ya cerrado: pasa a `registrar`, que responde «ya fu
 ¿Confirmas los campos en revisión de msg-006? Responde «confirmo …» con los valores correctos para registrarlos.
 ```
 
-**Una sola verdad con la bandeja**: una confirmación aceptada en el chat se anota en `out/decisiones.jsonl` con `via: "chat"` y aparece en la bandeja junto a las decisiones tomadas allí.
+**Una sola verdad con la bandeja**: chat y bandeja reanudan la pausa con la misma función (`aprobar` / `rechazar` de `approval-tray.ts`). Una decisión tomada en el chat se anota en `out/decisiones.jsonl` con `via: "chat"` y aparece en la bandeja junto a las decisiones tomadas allí.
 
 ## Topes de costo
 
@@ -106,4 +110,4 @@ Los tokens se cuentan con lo que reporta el proveedor (`uso.entrada` + `uso.sali
 
 ## Prompt de sistema
 
-`leerPromptSistema()` concatena `agent/prompt.md` + `---` + `api/src/knowledge/registro-contratos.md` en cada turno. Las definiciones de herramientas que ve el modelo (`definicionesParaModelo()`) se generan desde los esquemas zod con `z.toJSONSchema(..., { io: "input" })`, así los campos con valor por defecto (como `confirmado`) aparecen como opcionales.
+`leerPromptSistema()` concatena `agent/prompt.md` + `---` + `api/src/knowledge/registro-contratos.md` en cada turno. Las definiciones de herramientas que ve el modelo (`definicionesParaModelo()`) son solo las de `tools/recepcion.ts`, generadas desde los esquemas zod con `z.toJSONSchema(..., { io: "input" })`, así los campos con valor por defecto (como `correcciones`) aparecen como opcionales.

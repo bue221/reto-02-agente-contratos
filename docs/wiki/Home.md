@@ -10,9 +10,10 @@ El maestro de contratos de la empresa está congelado desde el 2026-05-30. Este 
 flowchart LR
   U[Analista] -->|chat o bandeja| W[Front React]
   W -->|HTTP /api| B[Backend Bun + Hono]
-  B --> A[Ciclo del agente]
+  B --> A[Recepcionista: ciclo ReAct]
   A -->|enviar| L[ProveedorLlm: Gemini u offline]
-  A -->|contratos_*| T[Herramientas zod]
+  A -->|5 herramientas recepcion_*| M[Motor determinista]
+  M -->|contratos_*| T[Herramientas zod]
   T --> F[(fixtures/ solo lectura)]
   T --> O[(out/ maestro, archivo, logs)]
 ```
@@ -25,7 +26,7 @@ flowchart LR
 | [Arquitectura](Architecture.md) | Capas, dependencias, composición y concurrencia. |
 | [Estructura del proyecto](Project-Structure.md) | Qué hay en cada carpeta y archivo. |
 | [Ciclo del agente](Agent-Loop.md) | Turno, topes, confirmación humana (CA1–CA5) y sesiones. |
-| [Herramientas](Tools.md) | Contrato `contratos_*`, validación, log y cómo llamarlas. |
+| [Herramientas](Tools.md) | Las `recepcion_*` que ve el modelo y las `contratos_*` del motor: contrato, validación, log y cómo llamarlas. |
 | [Extracción](Extraction.md) | Extractor determinista y niveles de confianza. |
 | [Reglas de negocio](Business-Rules.md) | RN1–RN7, clasificación, campos efectivos y estados de un mensaje. |
 | [Datos y almacenamiento](Data-and-Storage.md) | Fixtures de entrada y cada archivo de `out/`. |
@@ -33,6 +34,7 @@ flowchart LR
 | [Front](Frontend.md) | Pestañas, componentes y cliente de API. |
 | [Proveedores LLM](LLM-Providers.md) | Interfaz `ProveedorLlm`, Gemini, offline, cómo agregar otro. |
 | [Módulo reutilizable](Agent-Module.md) | `modulo/` (bonus PRD 9.4) y su sincronía. |
+| [LangGraph Studio](Studio.md) | `studio/`: los dos grafos en LangGraph.js para verlos y probar la pausa humana en Studio. |
 | [Pruebas](Testing.md) | Organización, utilidades y CI. |
 | [Despliegue](Deployment.md) | Docker, Vercel + AWS Lightsail, Render. |
 | [Contribuir](Contributing.md) | Convenciones, recetas paso a paso y checklist. |

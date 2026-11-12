@@ -1,6 +1,6 @@
 # Front
 
-React 19 + Vite 6 + TypeScript, sin librerías de UI ni de estado. Código en `web/src/`. Es uno de los dos workspaces de Bun (`"workspaces": ["api", "web"]` en el `package.json` raíz).
+React 19 + Vite 6 + TypeScript, sin librerías de UI ni de estado. Código en `web/src/`. Es uno de los tres workspaces de Bun (`"workspaces": ["api", "web", "studio"]` en el `package.json` raíz).
 
 ## Pestañas
 

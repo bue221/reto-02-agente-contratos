@@ -1,13 +1,13 @@
 # Pruebas
 
-Runner: `bun test` (sin dependencias extra). 84 pruebas, todas de la API, en `api/tests/`; ninguna necesita clave ni red. Se ejecutan con `bun run test` desde la raíz, o `bun test` desde la raíz o desde `api/`.
+Runner: `bun test` (sin dependencias extra). 103 pruebas: 99 de la API en `api/tests/` y 4 de los grafos de LangGraph en `studio/tests/` ([LangGraph Studio](Studio.md)); ninguna necesita clave ni red. Se ejecutan con `bun run test` desde la raíz, o `bun test` desde la raíz (todas) o desde `api/` o `studio/`.
 
 ## Organización
 
 | Carpeta | Qué prueba | Archivos |
 |---|---|---|
 | `api/tests/unit/` | Funciones puras o con dependencias simuladas. | `extraction.test.ts` (extractor, errores legibles, utilidades), `llm.test.ts` (adaptador Gemini con `fetch` simulado, selección de proveedor). |
-| `api/tests/integration/` | Varias capas juntas sobre un proyecto temporal con los fixtures reales. | `tools.test.ts` (buzón completo PRD §7.4, RN5/CA3, alertas, HU-6, zod), `agent.test.ts` (ciclo con offline y proveedores falsos, CA1–CA5), `api.test.ts` (chat, errores, CORS), `approval-tray.test.ts` (buzón, bandeja, chat ↔ bandeja, reinicio), `module.test.ts` (sincronía de `modulo/`). |
+| `api/tests/integration/` | Varias capas juntas sobre un proyecto temporal con los fixtures reales. | `tools.test.ts` (buzón completo PRD §7.4, RN5/CA3, alertas, HU-6, zod), `agent.test.ts` (ciclo de la recepcionista con offline y proveedores falsos, CA1–CA5, el modelo solo ve `recepcion_*`), `receptionist.test.ts` (herramientas `recepcion_*`, recorrido del grafo, pausa y reanudación), `api.test.ts` (chat, errores, CORS), `approval-tray.test.ts` (buzón, bandeja, chat ↔ bandeja, reinicio), `module.test.ts` (sincronía de `modulo/`). |
 | `api/tests/helpers.ts` | Utilidades compartidas. | — |
 
 ## Utilidades (`api/tests/helpers.ts`)

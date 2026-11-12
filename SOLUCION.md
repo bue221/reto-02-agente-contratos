@@ -9,17 +9,18 @@ Desde el 30 de mayo de 2026 nadie alimenta el maestro de contratos y solo llegan
 ```
 ┌────────────────────────┐  POST /api/chat       ┌──────────────────────────────────────────────┐
 │ Front React (web/)     │ ────────────────────▶ │ API Bun + Hono (api/src/server.ts, http/)    │
-│ Pestañas:              │ ◀──────────────────── │  AgenteContratos (api/src/agent/loop.ts)     │
-│ - Buzón (7 pasos,      │  { reply, toolCalls,  │   prompt → ProveedorLlm.enviar → llamadas    │
-│   correo vs extracción)│    needsConfirmation} │   → ejecutarHerramienta → … → respuesta      │
-│ - Bandeja de aprobación│  /api/buzon/*         │  Bandeja (workflows/approval-tray.ts):       │
-│ - Maestro CSV          │  /api/bandeja/*       │   procesar, aprobar, rechazar (mismas tools) │
-│ - Chat (tool calls,    │  /api/maestro(.csv)   │  ProveedorLlm: Gemini (fetch) | Offline       │
-│   confirmación)        │  /api/demo/reset      │  Sesiones: memoria + out/sesiones/<id>.json   │
-└────────────────────────┘                       │  AccesoOut: turnos/bandeja comparten out/,    │
-                                                 │   el reinicio lo toma en exclusiva            │
+│ Pestañas:              │ ◀──────────────────── │  Recepcionista ReAct (api/src/agent/loop.ts) │
+│ - Buzón (7 pasos,      │  { reply, toolCalls,  │   prompt → ProveedorLlm.enviar → 5 tools     │
+│   correo vs extracción)│    needsConfirmation} │   recepcion_* (tools/recepcion.ts) → …       │
+│ - Bandeja de aprobación│  /api/buzon/*         │  Motor determinista (application/workflows): │
+│ - Maestro CSV          │  /api/bandeja/*       │   ingestar → extraer → validar → decidir →   │
+│ - Chat (tool calls y   │  /api/maestro(.csv)   │   registrar | esperar_revision | cerrar →    │
+│   pasos del motor,     │  /api/demo/reset      │   alertas; la bandeja reanuda la misma pausa │
+│   confirmación)        │                       │  ProveedorLlm: Gemini (fetch) | Offline       │
+└────────────────────────┘                       │  Sesiones: memoria + out/sesiones/<id>.json   │
+                                                 │  AccesoOut: turnos/bandeja comparten out/     │
                                                  └──────────────┬───────────────────────────────┘
-                                                                │ herramientas contratos_* (zod)
+                                                                │ herramientas contratos_* (zod), solo desde el motor
                                        ┌────────────────────────┴────────────────────┐
                                        ▼                                             ▼
                           fixtures/reto-02/ (solo lectura)          out/ (escritura)
@@ -33,12 +34,14 @@ Desde el 30 de mayo de 2026 nadie alimenta el maestro de contratos y solo llegan
 |---|---|---|
 | **Comportamiento** | `agent/prompt.md` | Qué hace el agente, qué no puede afirmar, cuándo pregunta, formato de respuesta. |
 | **Conocimiento** | `api/src/knowledge/registro-contratos.md` | RN1–RN7, esquema, umbral 0.8, alertas, supuestos y resumen de gobierno. Se anexa al prompt de sistema. |
-| **Ejecución** | `api/src/tools/contratos.ts` (+ `api/src/core/`, `api/src/application/`, `api/src/infrastructure/`) | Única fuente de valores. Importable desde `demo.ts`, los tests y `modulo/` sin el servidor. |
+| **Ejecución** | `api/src/tools/recepcion.ts` (lo que ve el modelo) → motor en `api/src/application/workflows/` → `api/src/tools/contratos.ts` (+ `api/src/core/`, `api/src/application/use-cases/`, `api/src/infrastructure/`) | Única fuente de valores y único dueño del orden del proceso. Importable desde `demo.ts`, los tests y `modulo/` sin el servidor. |
 | **Parámetros de negocio** | `api/src/core/domain/parameters.ts` | Umbral, similitud, fecha de corte, ventana de alertas. |
 
 El prompt y el conocimiento **se leen en cada turno**: cambiar una regla del proceso no toca ni reinicia el servidor. El servidor solo compone dependencias (`api/src/server.ts`) y expone HTTP (`api/src/http/app.ts` y `api/src/http/hitl.ts`, rutas delgadas); el ciclo solo conoce la interfaz `ProveedorLlm`.
 
-**Human-in-the-loop fuera del chat.** Además del chat, el front tiene un **Buzón** (estado de cada correo derivado de `out/`, línea de tiempo de 7 pasos y el correo al lado de la extracción) y una **Bandeja de aprobación**. Ninguna acción de la bandeja tiene lógica de negocio propia: `procesar` es la misma pasada extraer → validar → registrar de `demo.ts`, `aprobar` llama a `contratos_registrar` con `confirmado: true` y el contrato corregido, y `rechazar` cierra el mensaje como `rechazado`. Todo pasa por `ejecutarHerramienta` (zod + `out/log.jsonl`) y cada decisión humana queda en `out/decisiones.jsonl` con quién, cuándo, por qué canal y qué corrigió.
+**Dos grafos: la recepcionista conversa, el motor ejecuta.** El modelo no ve las cinco herramientas del PRD: ve cinco `recepcion_*` que no contienen reglas de negocio. Tres son de lectura (`consultar_estado`, `consultar_maestro`, `explicar_validacion`) y dos son "botones" del motor: `procesar_buzon` lo enciende y `responder_revision` lo reanuda tras la decisión humana. El motor (`application/workflows/`) recorre siempre el mismo grafo por mensaje: `extraer → validar → decidir → registrar | esperar_revision | cerrar`, y al final `alertas`. La arista de `decidir` es una función pura de la validación (`rutaTrasValidar`). Así el modelo no puede decidir "hoy no valido", inventar un NIT ni saltarse la confirmación: no tiene herramientas para hacerlo. Cada mensaje devuelve su `recorrido` de nodos y su `desenlace`, y las llamadas `contratos_*` del motor se muestran en el chat anidadas bajo la llamada que las disparó.
+
+**Human-in-the-loop fuera del chat.** Además del chat, el front tiene un **Buzón** (estado de cada correo derivado de `out/`, línea de tiempo de 7 pasos y el correo al lado de la extracción) y una **Bandeja de aprobación**. Ninguna acción de la bandeja tiene lógica de negocio propia: `procesar` es el mismo grafo del motor para un mensaje, y `aprobar` y `rechazar` son la misma reanudación que usa `recepcion_responder_revision` (aprobar llama a `contratos_registrar` con `confirmado: true` y el contrato corregido; rechazar cierra el mensaje como `rechazado`). Todo pasa por las herramientas (zod + `out/log.jsonl`) y cada decisión humana queda en `out/decisiones.jsonl` con quién, cuándo, por qué canal y qué corrigió.
 
 **Reinicio de la demo.** `out/` es global al proceso: en el link público, quien procesa el buzón lo deja procesado para todos. `POST /api/demo/reset` (botón **Reiniciar demo**) borra `out/` (incluidas sesiones y pendientes de confirmación) y vuelve a copiar el maestro del fixture. `AccesoOut` coordina el acceso: turnos del chat y acciones de la bandeja lo comparten y el reinicio lo toma en exclusiva, así que espera a que termine un turno en curso y retiene los nuevos hasta acabar.
 
@@ -48,23 +51,23 @@ El prompt y el conocimiento **se leen en cada turno**: cambiar una regla del pro
 
 1. **Serializa por sesión** (un cerrojo por `sessionId`): dos peticiones simultáneas no intercalan historial.
 2. Agrega el mensaje del usuario y carga el prompt de sistema (prompt + conocimiento).
-3. **Bucle** hasta `MAX_ITERACIONES` (25): verifica topes de tokens → `proveedor.enviar(mensajes, herramientas)` → si la respuesta no trae llamadas, es la respuesta final; si trae, ejecuta cada una con `ejecutarHerramienta` (valida con zod, nunca lanza, escribe `out/log.jsonl`) y agrega los resultados al historial. Los argumentos inválidos y las herramientas inexistentes vuelven al modelo como `{ ok: false, error }` para que se corrija.
+3. **Bucle** hasta `MAX_ITERACIONES` (25): verifica topes de tokens → `proveedor.enviar(mensajes, herramientas recepcion_*)` → si la respuesta no trae llamadas, es la respuesta final; si trae, ejecuta cada una (valida con zod, nunca lanza, escribe `out/log.jsonl`) y agrega los resultados al historial. Los argumentos inválidos y las herramientas fuera de las cinco `recepcion_*` (incluidas las `contratos_*`, que solo llama el motor) vuelven al modelo como `{ ok: false, error }` para que se corrija.
 4. **CA1**: si se agota el tope, responde con lo que alcanzó a hacer (cada llamada con su resumen) y lo que falta, e invita a «continúa».
 5. **Topes de costo**: tokens por sesión (`MAX_TOKENS_SESION`) y por proceso (`MAX_TOKENS_PROCESO`, para que abrir sesiones nuevas no evada el límite). Al llegar, se corta antes de llamar al modelo con un mensaje claro.
 6. **CA5**: un error del proveedor (HTTP, red, timeout por `AbortController`, respuesta bloqueada) o interno vuelve como `reply` legible; el turno siempre cierra con un mensaje del asistente para que la sesión siga siendo válida para el modelo.
-7. **CA4**: cada llamada queda en `toolCalls` (nombre, argumentos, ok, resumen), en el historial de la sesión (`GET /api/sessions/:id`) y en `out/log.jsonl`.
+7. **CA4**: cada llamada queda en `toolCalls` (nombre, argumentos, ok, resumen, y en `pasos` las `contratos_*` que ejecutó el motor por debajo), en el historial de la sesión (`GET /api/sessions/:id`) y en `out/log.jsonl`.
 
 **Confirmación humana (CA3), determinista y no solo por prompt:**
 
-- Un mensaje queda *pendiente de confirmación* si `contratos_validar` devuelve `requiere_revision` no vacío para un `nuevo`/`actualizacion`, o si `contratos_registrar` responde `requiere revisión: …`. Sale de pendientes cuando `registrar` tiene éxito.
+- Un mensaje queda *pendiente de confirmación* cuando el motor lo deja en el nodo `esperar_revision` (clasificación `nuevo`/`actualizacion` con `requiere_revision` no vacío): `recepcion_procesar_buzon` lo devuelve en `en_revision` con el detalle campo por campo. La pausa la decide el motor, no el modelo. Sale de pendientes cuando `recepcion_responder_revision` lo aprueba o lo rechaza.
 - Si el turno deja pendientes nuevos, la respuesta lleva `needsConfirmation: true`; si el texto del modelo no termina en pregunta, el ciclo agrega una pregunta explícita. El front resalta la burbuja y muestra un banner con botón **Confirmo**.
-- **Guarda en el servidor** (`api/src/agent/execution.ts`): `registrar` con `confirmado: true` solo se ejecuta para mensajes que quedaron pendientes **en un turno anterior**. El modelo no puede autoconfirmar en el mismo turno en que detecta la duda: recibe un error y debe preguntar.
-- Además, `registrar` vuelve a extraer el documento en el servidor: si el modelo cambia un valor, ese campo queda con confianza 0 y solo pasa con `confirmado: true`.
-- **Una sola verdad para chat y bandeja**: `validar` y `registrar` (sin confirmar) guardan el último análisis de cada mensaje en `out/analisis.json`. Un mensaje *espera confirmación* si ese análisis es `nuevo`/`actualizacion` con campos en revisión y no está en `procesados.json`. Así, lo que el chat deja en revisión aparece en la bandeja, y lo que se aprueba o rechaza en cualquiera de los dos sale de ambos: al empezar cada turno, la sesión descarta los pendientes que ya se cerraron en otro canal, y una confirmación tardía en el chat recibe «ya fue procesado» en lugar de registrar dos veces.
+- **Guarda en el servidor** (`api/src/agent/execution.ts`): `recepcion_responder_revision` solo se ejecuta para mensajes que quedaron pendientes **en un turno anterior** de la misma sesión. El modelo no puede aprobar ni rechazar en el mismo turno en que el motor pausó el mensaje, ni sobre uno por el que nunca preguntó: recibe un error y debe preguntar. Tampoco puede llamar a `contratos_registrar` con `confirmado: true` por su cuenta, porque esa herramienta no está en su conjunto.
+- Además, `registrar` vuelve a extraer el documento en el servidor: las correcciones que dicta la analista quedan con confianza 1 y la evidencia de quién las fijó, y cualquier otro valor sale del documento.
+- **Una sola verdad para chat y bandeja**: `validar` guarda el último análisis de cada mensaje en `out/analisis.json`. Un mensaje *espera confirmación* si ese análisis es `nuevo`/`actualizacion` con campos en revisión y no está en `procesados.json`. Chat y bandeja reanudan la pausa con la misma función, así que lo que el chat deja en revisión aparece en la bandeja y lo que se aprueba o rechaza en cualquiera de los dos sale de ambos. Al empezar cada turno, la sesión descarta los pendientes que ya se cerraron en otro canal, y una confirmación tardía en el chat recibe «ya fue procesado» en lugar de registrar dos veces.
 - **La bandeja también cumple CA3**: solo aprueba o rechaza mensajes que esperan confirmación (`409 no_pendiente` si no), con un humano identificado (`aprobador`). Las correcciones se validan con el mismo esquema zod de los campos del contrato y quedan con confianza 1 y evidencia «corregido por …»; el servidor revalida todo antes de escribir.
 - Un mensaje ya cerrado no se reevalúa: validarlo de nuevo contra el maestro que él mismo actualizó lo marcaría como duplicado.
 
-Verificado con Gemini real (dos turnos del PRD §11): primer turno con 15 llamadas (lectura, 5 extracciones, 5 validaciones, 3 registros, alertas), msg-006 sin registrar y `needsConfirmation: true`; tras «confirmo el valor 0 y la fecha fin 2027-08-31», una llamada a `registrar` con `confirmado: true` → `insertado CM-2026-03`.
+Verificado con Gemini real (turnos del PRD §11 y una pregunta): primer turno con **una** llamada del modelo (`recepcion_procesar_buzon`) y 17 pasos del motor (lectura, 6 extracciones, 6 validaciones, 3 registros, alertas), msg-006 en `esperar_revision` y `needsConfirmation: true`; tras «confirmo el valor 0 y la fecha fin 2027-08-31», una llamada a `recepcion_responder_revision` con `correcciones: { valor: 0, fecha_fin: "2027-08-31" }` → `contratos_registrar` confirmado → `insertado CM-2026-03` y alertas regeneradas; «¿cuándo vence CT-2026-009?» → una lectura de `recepcion_consultar_maestro`, sin tocar el motor.
 
 ## 4. Elección del modelo
 
@@ -74,13 +77,12 @@ Verificado con Gemini real (dos turnos del PRD §11): primer turno con 15 llamad
 - *Alternativas descartadas*: Gemini 2.5 Pro (≈4× el costo y más lento sin mejora visible en orquestación), Claude Sonnet / GPT (buen tool use, pero mayor costo por token para este volumen; cambiarlos es escribir otra clase que implemente `ProveedorLlm`, sin tocar el ciclo).
 - *Costo medido* (ejecución real del flujo §11, precios de lista de 2.5 Flash: USD 0.30 por 1M tokens de entrada y USD 2.50 por 1M de salida, salida incluye "thinking"):
 
-| Turno | Entrada | Salida | Costo aprox. |
+| Sesión | Entrada | Salida | Costo aprox. |
 |---|---|---|---|
-| Procesar buzón (6 mensajes) | 72.432 | 13.043 | USD 0.054 |
-| Confirmar msg-006 | 38.186 | 1.266 | USD 0.015 |
-| **Total** | **110.618** | **14.309** | **≈ USD 0.069** |
+| Procesar buzón (6 mensajes) + confirmar msg-006 + una consulta al maestro | 36.260 | 1.529 | **≈ USD 0.015** |
+| Referencia: la versión anterior, en que el modelo llamaba a las `contratos_*` una por una (solo los dos primeros turnos) | 110.618 | 14.309 | ≈ USD 0.069 |
 
-**≈ USD 0.012 por caso procesado** (unos 18.000 tokens de entrada por caso). La entrada domina porque cada iteración reenvía el historial, incluido el `Contrato` que el modelo devuelve completo a `validar` y `registrar` (contrato de herramientas del PRD). Con los topes por defecto, una sesión no puede pasar de 300.000 tokens (≈ USD 0.15) ni el proceso de 3M (≈ USD 1.5).
+**≈ USD 0.0025 por caso procesado**, unas 5 veces menos que antes. El ahorro viene de la arquitectura: el modelo ya no reenvía el `Contrato` completo a `validar` y `registrar` ni acumula 15 resultados en el historial. Hace una llamada por intención y el motor devuelve un resumen compacto, sin el contrato. Con los topes por defecto, una sesión no puede pasar de 300.000 tokens (≈ USD 0.15) ni el proceso de 3M (≈ USD 1.5).
 
 ## 5. Estrategia de extracción
 
@@ -94,7 +96,7 @@ Determinista sobre `contrato.txt` (`api/src/core/extraction/`), sin modelo:
 
 **Confianza**: niveles fijos por fuerza de la evidencia, no probabilidades: 0.95 explícito y consistente; 0.85–0.9 derivado (fin por meses, objeto truncado); 0.8 tomado de otra cláusula; 0.5–0.6 ambiguo o contradictorio; `null`/0 si no aparece. Umbral **0.8** (RN5). Cada campo trae `evidencia` (el fragmento literal).
 
-**Dónde entra el modelo**: orquesta las herramientas, presenta resultados, pregunta y traduce la respuesta de la analista a una llamada con `confirmado: true` (y valores corregidos). **Dónde no**: no extrae, no clasifica, no calcula alertas ni escribe archivos. Cualquier valor que proponga pasa por `validar`/`registrar`, que reextraen en el servidor y le asignan confianza 0 si difiere del documento.
+**Dónde entra el modelo**: decide cuándo consultar y cuándo encender o reanudar el motor, presenta resultados, pregunta y traduce la respuesta de la analista a `recepcion_responder_revision` con sus correcciones. **Dónde no**: no extrae, no clasifica, no elige el camino de un contrato, no calcula alertas ni escribe archivos. Las correcciones que transmite pasan por `contratos_registrar`, que reextrae el documento en el servidor y vuelve a validar antes de escribir.
 
 ## 6. Regla de gobierno
 
@@ -115,15 +117,16 @@ Determinista sobre `contrato.txt` (`api/src/core/extraction/`), sin modelo:
 |---|---|---|
 | **Ciclo propio + `fetch` a la API REST de Gemini** | LangGraph/LangChain (la versión anterior del repo) o un SDK (Vercel AI SDK, `@google/genai`) | El PRD evalúa el ciclo, el tope de iteraciones y la confirmación: tenerlos en ~200 líneas propias los hace explicables línea por línea y testeables con un proveedor falso. Menos dependencias y ningún comportamiento oculto de reintentos o memoria. Costo: mapear a mano el formato de Gemini (roles, `functionResponse`, `thoughtSignature`). |
 | **Extracción determinista como única fuente de valores** | Extracción con el modelo (salida estructurada) | El riesgo principal del PRD es que el modelo "redondee" o invente. Con regex y heurísticas, cada valor tiene evidencia literal y una confianza reproducible; la demo y los tests no necesitan clave. Costo: menos cobertura ante formatos nuevos (se mitiga con revisión humana bajo 0.8). |
-| **CA3 detectado por resultados de herramientas + guarda en el servidor** | Confiar en que el modelo pregunte (solo prompt) o una herramienta `pedir_confirmacion` | La prueba en vivo mostró que el modelo a veces no intenta `registrar` y solo pregunta: detectar por `validar`/`registrar` hace `needsConfirmation` fiable, y la guarda impide autoconfirmar. Una herramienta extra dependería igual de que el modelo la llame. |
-| **Proveedor offline con guion determinista** | Solo mocks en tests | Permite probar la app completa sin clave (también en el link si la clave falla) y es el mismo contrato `ProveedorLlm`. Costo: no conversa libremente; responde ayuda fuera del guion. |
+| **Dos grafos: recepcionista ReAct con 5 herramientas + motor determinista** | Un solo ReAct con las `contratos_*` (la versión anterior), o 10+ herramientas finas | Con las `contratos_*` expuestas, el modelo podía decidir el orden, saltarse `validar` o reenviar valores alterados, y cada caso costaba 15 llamadas con el contrato completo en el historial. Con cinco herramientas sin reglas de negocio, el camino lo fija el grafo y el modelo solo conversa: menos opciones para equivocarse, ~5× menos tokens y un recorrido auditable por mensaje. Costo: preguntas muy finas ("vuelve a validar solo msg-003") pasan igual por el grafo completo del mensaje. Las `contratos_*` siguen siendo el contrato del PRD para `demo.ts`, el motor y `modulo/`. |
+| **CA3 decidido por el motor + guarda en el servidor** | Confiar en que el modelo pregunte (solo prompt) o una herramienta `pedir_confirmacion` | La pausa es un nodo del grafo (`esperar_revision`), así que `needsConfirmation` no depende de que el modelo intente registrar. La guarda impide que el modelo apruebe o rechace sin haber preguntado en un turno anterior. |
+| **Proveedor offline con guion determinista** | Solo mocks en tests | Permite probar la app completa sin clave (también en el link si la clave falla) y es el mismo contrato `ProveedorLlm` sobre las mismas cinco herramientas de la recepcionista. Costo: no conversa libremente; responde ayuda fuera del guion. |
 | **Sesiones en memoria + JSON en `out/sesiones/`** | Base de datos o Redis | El PRD no pide base de datos y hay un solo proceso. Costo: en el disco efímero del contenedor se pierden al redesplegar. |
 | **Front en Vercel + backend en AWS Lightsail Containers** | Imagen única (API + front) en Render; AWS Lambda con Function URL | Lightsail mantiene un proceso siempre encendido, así que la sesión sobrevive entre "procesa el buzón" y "confirmo…" (en Lambda cada invocación puede caer en otra instancia y habría que llevar sesiones y `out/` a S3). Vercel sirve el front estático desde CDN. Costo: dos orígenes, por eso CORS restringido a `CORS_ORIGINS` y `VITE_API_URL` en el build; Lightsail nano cuesta ≈ 7 USD/mes. |
-| **Bandeja de aprobación además del chat** | Solo el chat | La analista revisa campo por campo con la evidencia al lado y corrige en un formulario, sin depender de que el modelo traduzca bien «confirmo …». La bandeja no duplica reglas: llama a las mismas herramientas, así que RN5 y la revalidación en el servidor son idénticas. |
+| **Bandeja de aprobación además del chat** | Solo el chat | La analista revisa campo por campo con la evidencia al lado y corrige en un formulario, sin depender de que el modelo traduzca bien «confirmo …». La bandeja no duplica reglas: reanuda la pausa del motor con la misma función que el chat, así que RN5 y la revalidación en el servidor son idénticas. |
 | **Estado de revisión derivado de `out/` (`analisis.json` + `procesados.json`)** | Pendientes solo dentro de cada sesión de chat | Con pendientes por sesión, la bandeja no vería lo que dejó el chat y una aprobación en la bandeja no se reflejaría en el chat. Derivarlo de archivos que ya escriben las herramientas da una fuente única. Costo: la guarda CA3 del chat sigue siendo por sesión (el agente debe haber preguntado en esa conversación). |
 | **Reinicio de la demo por API con cerrojo lector/escritor** | Redesplegar para limpiar `out/` | El link público es compartido: sin reinicio, el primero que procesa el buzón deja a los demás sin nada que probar. El cerrojo evita borrar `out/` en medio de un turno. |
 | **Render de Markdown propio en el front (subconjunto)** | `react-markdown` + `remark-gfm` | Las respuestas solo usan tablas, títulos, listas, negrita y código; ~100 líneas sin dependencias y sin HTML crudo (React escapa todo, sin superficie de inyección desde el texto del modelo). |
-| **Mantener el `Contrato` completo como argumento de `validar`/`registrar`** | Pasar solo `mensaje_id` + correcciones | Es el contrato de herramientas del PRD. Costo: más tokens y el modelo puede omitir campos `null` o mandar `evidencia: null`; el esquema los tolera y los errores de validación vuelven al modelo, que debe reintentar. |
+| **Mantener el `Contrato` completo como argumento de `validar`/`registrar`** | Pasar solo `mensaje_id` + correcciones | Es el contrato de herramientas del PRD. Desde que las llama el motor, el contrato lo arma el servidor y el modelo solo envía `mensaje_id` y las correcciones que dictó la analista. El esquema sigue tolerando campos `null` omitidos o `evidencia: null` para quien use `modulo/tools/contratos.ts` directamente. |
 
 **Dependencias** (todas justificadas): `zod` (obligatorio; además genera el JSON Schema que ve el modelo y valida la configuración y la API), `hono` (enrutador HTTP y archivos estáticos sobre Bun, pequeño y tipado), `react`/`react-dom` + `vite` + `@vitejs/plugin-react` (front), `typescript` y `@types/bun` (desarrollo). Sin SDK de LLM.
 
@@ -207,7 +210,7 @@ Descartado de lo propuesto: mantener LangGraph (más dependencias y comportamien
 | Riesgo | Mitigación |
 |---|---|
 | Contratos escaneados o formatos nuevos que la extracción no reconoce. | OCR + extracción asistida por modelo **solo como propuesta**; todo lo bajo 0.8 sigue pasando por revisión humana. Medir % de campos en revisión por mes. |
-| El modelo afirma o recalcula un valor de memoria (en la prueba en vivo actualizó una lista de alertas sin volver a llamar la herramienta). | Regla en el prompt; validar en el servidor que cifras e ids de la respuesta existan en resultados de herramientas del turno; tablas renderizadas desde `toolCalls` en lugar de texto libre. |
+| El modelo afirma o recalcula un valor de memoria (en una prueba en vivo de la versión anterior actualizó una lista de alertas sin volver a llamar la herramienta). | Ya mitigado en parte: `recepcion_responder_revision` regenera las alertas tras cada decisión y el modelo no calcula nada. Falta validar en el servidor que cifras e ids de la respuesta existan en resultados de herramientas del turno, o renderizar las tablas desde `toolCalls` en lugar de texto libre. |
 | Inyección de instrucciones desde el texto del contrato o del correo. | Las herramientas son la única vía de escritura, no hay shell ni edición de archivos, y `confirmado` lo controla el servidor. Delimitar el texto de documentos en los resultados. |
 | Estado compartido en el link público: cualquiera puede procesar, aprobar o reiniciar la demo para todos. | Aceptable para la demo (botón con confirmación). En producción: autenticación, aprobador tomado de la identidad y no de un campo libre, reinicio deshabilitado. |
 | Abuso del link público y gasto de la clave. | Topes de iteraciones y tokens por sesión y por proceso; en producción, autenticación (SSO) y límite por IP/usuario. |

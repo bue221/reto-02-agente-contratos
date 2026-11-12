@@ -12,7 +12,7 @@ Resumen operativo en [`AGENTS.md`](../../AGENTS.md). Aquí, las convenciones com
 | Componentes React | inglés | `PascalCase.tsx`, mismo nombre que el export | `ProposalCard.tsx` → `ProposalCard` |
 | Identificadores de código | español | `camelCase` / `PascalCase` | `registrarMensaje`, `AgenteContratos` |
 | Campos del dominio, columnas, JSON de la API | español | `snake_case` | `id_contrato`, `requiere_revision` |
-| Herramientas | español | `contratos_<export>` | `contratos_registrar` |
+| Herramientas | español | `contratos_<export>` / `recepcion_<export>` | `contratos_registrar`, `recepcion_procesar_buzon` |
 | Rutas HTTP | español | `/api/<recurso>` | `/api/bandeja/:id/aprobar` |
 | Textos de UI, errores y logs | español | — | `"el mensaje no puede estar vacío"` |
 | Commits | inglés | Conventional Commits | `fix(api): Return 409 when tray item is closed` |
@@ -61,8 +61,15 @@ type(scope): Subject in present tense, capitalized, no period
 
 ### Nueva herramienta
 
+Primero decide en qué capa va (ver [Arquitectura → Dos grafos](Architecture.md#dos-grafos-la-recepcionista-y-el-motor)):
+
+- **Un paso del proceso** (algo que el motor debe ejecutar siempre en un orden fijo) → `api/src/tools/contratos.ts` y un nodo en `api/src/application/workflows/contract-graph.ts` o `process-mailbox.ts`. El modelo no la verá.
+- **Algo que la analista pide en el chat** (una consulta o una forma de encender el motor) → `api/src/tools/recepcion.ts`. Debe ser de solo lectura o delegar en el motor: nunca contiene reglas de negocio. Mantén el conjunto pequeño: cada herramienta extra es una opción más para equivocarse.
+
+Pasos (los mismos en los dos archivos):
+
 1. Lógica en un caso de uso nuevo `api/src/application/use-cases/<accion>.ts` que devuelva `Promise<Resultado<T>>`.
-2. En `api/src/tools/contratos.ts`:
+2. En el archivo de herramientas elegido:
 
    ```ts
    export const mi_accion = definirHerramienta({
@@ -75,9 +82,9 @@ type(scope): Subject in present tense, capitalized, no period
    ```
 
 3. Regístrala en el objeto `herramientas` con `[nombre("mi_accion")]: mi_accion`.
-4. Reexpórtala en `modulo/tools/contratos.ts`.
-5. Menciónala en `api/src/knowledge/registro-contratos.md` (sección Herramientas) y, si cambia el flujo, en `agent/prompt.md`; luego `bun run sync:module`.
-6. Prueba en `api/tests/integration/tools.test.ts` y, si el guion offline debe usarla, en `api/src/llm/offline/script.ts`.
+4. Reexpórtala en `modulo/tools/contratos.ts` o `modulo/tools/recepcion.ts`.
+5. Menciónala en `api/src/knowledge/registro-contratos.md` (sección «Dos capas») y, si es de la recepcionista, en la tabla de `agent/prompt.md`; luego `bun run sync:module`.
+6. Prueba en `api/tests/integration/tools.test.ts` (motor) o `receptionist.test.ts` (recepcionista) y, si el guion offline debe usarla, en `api/src/llm/offline/script.ts`.
 
 ### Nuevo proveedor LLM
 

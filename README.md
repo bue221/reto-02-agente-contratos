@@ -17,7 +17,9 @@ bun install && bun run dev
 
 Abre <http://localhost:5173>. `bun run dev` ejecuta el script `dev` de cada workspace: la API (`api/`) en `:3000` con recarga y el front Vite (`web/`) en `:5173` con proxy de `/api` a la API.
 
-- **Sin clave** el backend usa el proveedor `offline`: un guion determinista que llama a las mismas herramientas, suficiente para recorrer el flujo de la demo (procesar el buzón, pedir confirmación de msg-006, registrar tras «confirmo …»).
+- **Sin clave** el backend usa el proveedor `offline`: un guion determinista que hace de recepcionista con las mismas herramientas, suficiente para recorrer el flujo de la demo (procesar el buzón, pedir confirmación de msg-006, registrar tras «confirmo …» o rechazar con «rechaza msg-006 porque …»).
+
+**Cómo está partido el agente.** El modelo es una *recepcionista* con solo cinco herramientas `recepcion_*`: consultar el estado del buzón, consultar el maestro, explicar una validación, procesar el buzón y responder una revisión. Las dos últimas encienden y reanudan un **motor determinista** que recorre siempre el mismo grafo por mensaje (`extraer → validar → decidir → registrar | esperar revisión humana | cerrar`, y al final `alertas`) sobre las herramientas `contratos_*` del PRD. El modelo conversa; el camino de cada contrato no lo decide él. En el chat, cada llamada muestra debajo los pasos del motor.
 - **Con Gemini**: `cp .env.example .env` y completa `GOOGLE_API_KEY` ([Google AI Studio](https://aistudio.google.com/apikey)). Con `LLM_PROVIDER=auto` (por defecto) el backend usa Gemini si encuentra la clave.
 
 Modo producción (un solo proceso que sirve API + front compilado):
@@ -68,11 +70,19 @@ Todas opcionales; ver [`.env.example`](.env.example). La clave solo vive en el b
 | `CORS_ORIGINS` | vacío | Orígenes del front desplegado aparte, separados por coma. Vacío: solo mismo origen. |
 | `VITE_API_URL` | vacío | Solo en el build del front: URL pública del backend. Vacío: mismo origen. |
 
+## Ver los grafos en LangGraph Studio
+
+```bash
+bun run studio                   # servidor de LangGraph en :2024 con los grafos "recepcionista" y "motor"
+```
+
+Abre <https://smith.langchain.com/studio?baseUrl=http://localhost:2024>. Es solo para desarrollo: los grafos de `studio/` llaman a las mismas herramientas, prompt, proveedor y guarda CA3 que la app, y escriben en el mismo `out/`. El grafo `motor` se detiene en `revision_humana` (interrupt) hasta que respondas `{ "decision": "aprobar", "correcciones": { … } }` o `{ "decision": "rechazar", "motivo": "…" }`. Detalle en la [wiki](docs/wiki/Studio.md).
+
 ## Verificación sin modelo
 
 ```bash
 bun install && bun run demo.ts   # procesa los 6 mensajes llamando directo a las herramientas
-bun run test                     # 84 pruebas de api/tests: extracción, reglas, herramientas, ciclo, HTTP, bandeja, reinicio, módulo
+bun run test                     # 103 pruebas: api/tests (extracción, reglas, herramientas, motor, ciclo, HTTP, bandeja, reinicio, módulo) y studio/tests
 bun run typecheck                # api + web
 ```
 
@@ -82,24 +92,24 @@ bun run typecheck                # api + web
 
 | Método | Ruta | Cuerpo / respuesta |
 |---|---|---|
-| `POST` | `/api/chat` | `{ sessionId, message }` → `{ reply, toolCalls: [{ nombre, args, ok, resumen }], needsConfirmation }` |
+| `POST` | `/api/chat` | `{ sessionId, message }` → `{ reply, toolCalls: [{ nombre, args, ok, resumen, pasos? }], needsConfirmation }`; `toolCalls` son las `recepcion_*` del modelo y `pasos`, las `contratos_*` que ejecutó el motor por debajo |
 | `GET` | `/api/sessions/:id` | Sesión completa: `turnos[]` visibles, `mensajes[]` del modelo, `tokens`, `pendientesConfirmacion[]` |
 | `GET` | `/api/health` | `{ ok: true, provider, model }` (sin claves) |
 | `GET` | `/api/maestro` | `{ filas[] }` del maestro de trabajo (`out/sharepoint/maestro-contratos.csv`) |
 | `GET` | `/api/maestro.csv` | Descarga del CSV del maestro de trabajo |
 | `GET` | `/api/buzon` | `{ contadores: { total, pendientes, requiere_revision, procesados }, mensajes[], errores[] }`; cada mensaje con `estado` (`pendiente`, `requiere_revision`, `registrado`, `actualizado`, `duplicado`, `rechazado`), `clasificacion`, `id_contrato` y `decidido_por` |
 | `GET` | `/api/buzon/:id` | Detalle de solo lectura: correo, adjuntos con texto, extracción con `confianza` y `evidencia` por campo (tras analizar), validación (`clasificacion`, `requiere_revision`, `revisiones`, `diferencias`, `avisos`), decisión humana, fila del maestro, `linea_tiempo[7]`, historial y log del mensaje |
-| `POST` | `/api/buzon/:id/procesar` | extraer → validar → registrar **sin** confirmación (igual que `demo.ts`): lo limpio se registra, lo dudoso pasa a la bandeja. `409 ya_procesado` si ya se cerró |
+| `POST` | `/api/buzon/:id/procesar` | El grafo del motor para un mensaje (extraer → validar → decidir → registrar \| esperar revisión \| cerrar), igual que el chat y `demo.ts`: lo limpio se registra, lo dudoso pasa a la bandeja. `409 ya_procesado` si ya se cerró |
 | `GET` | `/api/bandeja` | `{ pendientes: [{ mensaje, validacion, contrato, desde }], resueltas: [decisiones] }` |
 | `POST` | `/api/bandeja/:id/aprobar` | `{ aprobador, correcciones? }` → `contratos_registrar` con `confirmado: true` y el contrato corregido (el servidor vuelve a validar). `correcciones` acepta solo campos del contrato con su tipo, p. ej. `{ "valor": 0, "fecha_fin": "2027-08-31" }` |
 | `POST` | `/api/bandeja/:id/rechazar` | `{ aprobador, motivo }` → cierra el mensaje como `rechazado` sin tocar el maestro |
 | `POST` | `/api/demo/reset` | `{ ok: true, mensajes }`: vacía `out/` y las sesiones y vuelve a copiar el maestro; espera a que terminen los turnos de chat en curso |
 
-Errores tipados: `{ ok: false, error: { codigo, mensaje } }` con `400 peticion_invalida` (cuerpo que no cumple el esquema zod o JSON roto: `sessionId` con `[A-Za-z0-9_-]{1,64}`, `message` de 1 a 4000 caracteres, `aprobador` y `motivo` obligatorios, `correcciones` sin campos desconocidos), `404` (`mensaje_no_encontrado`, `sesion_no_encontrada`, `ruta_no_encontrada`), `409` (`ya_procesado`, `no_pendiente`: solo se aprueba o rechaza lo que espera confirmación), `422 registro_fallido` y `500`. Un error del modelo o de una herramienta en el chat **no** es un error HTTP: vuelve como `reply` en lenguaje claro y la sesión sigue (CA5). Cada acción de la bandeja pasa por las mismas herramientas y queda en `out/log.jsonl` (`bandeja_aprobar`, `bandeja_rechazar`); las decisiones humanas, en `out/decisiones.jsonl`.
+Errores tipados: `{ ok: false, error: { codigo, mensaje } }` con `400 peticion_invalida` (cuerpo que no cumple el esquema zod o JSON roto: `sessionId` con `[A-Za-z0-9_-]{1,64}`, `message` de 1 a 4000 caracteres, `aprobador` y `motivo` obligatorios, `correcciones` sin campos desconocidos), `404` (`mensaje_no_encontrado`, `sesion_no_encontrada`, `ruta_no_encontrada`), `409` (`ya_procesado`, `no_pendiente`: solo se aprueba o rechaza lo que espera confirmación), `422 registro_fallido` y `500`. Un error del modelo o de una herramienta en el chat **no** es un error HTTP: vuelve como `reply` en lenguaje claro y la sesión sigue (CA5). Cada acción de la bandeja pasa por las mismas herramientas y queda en `out/log.jsonl` (`bandeja_aprobar`, `bandeja_rechazar`; desde el chat, `chat_aprobar`, `chat_rechazar`); las decisiones humanas, en `out/decisiones.jsonl`.
 
 ## Estructura
 
-Monorepo con dos workspaces de Bun: `api/` (backend) y `web/` (front).
+Monorepo con tres workspaces de Bun: `api/` (backend), `web/` (front) y `studio/` (solo desarrollo: los grafos para LangGraph Studio).
 
 ```
 api/                                 backend Bun + Hono (workspace)
@@ -108,17 +118,18 @@ api/                                 backend Bun + Hono (workspace)
 │   ├── server.ts                    arranque: compone dependencias y sirve API + front
 │   ├── config.ts                    variables de entorno validadas con zod
 │   ├── knowledge/registro-contratos.md  conocimiento del proceso (reglas, esquema, gobierno)
-│   ├── tools/                       herramientas contratos_* (contratos.ts) y su envoltorio común (tool.ts)
-│   ├── agent/                       ciclo del agente, guarda de confirmación, sesiones, prompt
+│   ├── tools/                       recepcion_* que ve el modelo (recepcion.ts), contratos_* del PRD (contratos.ts) y envoltorio común (tool.ts)
+│   ├── agent/                       ciclo ReAct de la recepcionista, guarda de confirmación, sesiones, prompt
 │   ├── llm/                         adaptador (adapter.ts), Gemini, offline y fábrica
 │   ├── http/                        rutas Hono (chat en app.ts, buzón/bandeja/reinicio en hitl.ts) y tipos compartidos con el front
 │   ├── application/use-cases/       validar, registrar, alertas, estado de mensajes, vistas del buzón, línea de tiempo, reinicio
-│   ├── application/workflows/       orquestación sobre las herramientas: pasada de demo.ts y acciones de la bandeja
+│   ├── application/workflows/       motor determinista: grafo por mensaje, pasada del buzón y reanudación tras la revisión humana
 │   ├── core/                        núcleo puro, sin E/S: domain/, extraction/, rules/
 │   └── infrastructure/              archivos de fixtures/ y out/: buzón, maestro CSV, bitácoras, análisis, decisiones, cerrojo
 ├── tests/                           unit/ (extracción, LLM) e integration/ (herramientas, agente, HTTP, bandeja, módulo)
 └── scripts/sync-module.ts           genera modulo/ desde agent/ y el conocimiento
 web/                                 front React + Vite (workspace): src/views, components, lib, styles
+studio/                              solo desarrollo (workspace): los dos grafos en LangGraph.js para LangGraph Studio
 agent/prompt.md                      comportamiento del agente (system prompt), compartido por la API y modulo/
 modulo/                              bonus PRD 9.4: el mismo agente empaquetado para otras plataformas (ver abajo)
 fixtures/reto-02/                    buzón, maestro y comerciales de entrada (solo lectura)
@@ -130,9 +141,9 @@ Dockerfile, docker-compose.yml, render.yaml   imagen única (API + front) y desp
 
 Desde la raíz, `bun run dev`, `bun run test`, `bun run typecheck`, `bun run demo` y `bun run sync:module` delegan en los workspaces; también puedes ejecutarlos dentro de `api/` o `web/`.
 
-**¿Qué es `modulo/`?** Es el bonus del PRD (§9.4): el mismo agente empaquetado como tres archivos para que otra plataforma de agentes lo use sin este servidor: `agent.md` (el prompt con frontmatter), `skill/registro-contratos/SKILL.md` (el conocimiento) y `tools/contratos.ts` (reexporta las herramientas de `api/`). No es código aparte.
+**¿Qué es `modulo/`?** Es el bonus del PRD (§9.4): el mismo agente empaquetado para que otra plataforma de agentes lo use sin este servidor: `agent.md` (el prompt con frontmatter), `skill/registro-contratos/SKILL.md` (el conocimiento), `tools/recepcion.ts` (las cinco herramientas que ve el agente) y `tools/contratos.ts` (las del PRD que llama el motor). No es código aparte.
 
-`modulo/agent.md` y `modulo/skill/registro-contratos/SKILL.md` se generan con `bun run sync:module` (un test falla si divergen); `modulo/tools/contratos.ts` reexporta las mismas herramientas.
+`modulo/agent.md` y `modulo/skill/registro-contratos/SKILL.md` se generan con `bun run sync:module` (un test falla si divergen); los dos archivos de `modulo/tools/` reexportan las mismas herramientas de `api/`.
 
 La documentación técnica completa está en la [wiki](docs/wiki/Home.md); las instrucciones para agentes de código, en [`AGENTS.md`](AGENTS.md).
 

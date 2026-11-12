@@ -49,15 +49,15 @@ Costo medido y justificación de la elección: `SOLUCION.md` §4.
 
 ## Offline (`offline.ts` + `offline/`)
 
-Proveedor sin modelo para probar la app completa sin clave (también es el que usan CI y los tests). Reporta 0 tokens.
+Proveedor sin modelo para probar la app completa sin clave (también es el que usan CI y los tests). Reporta 0 tokens. Hace de recepcionista con las mismas cinco herramientas `recepcion_*` que ve un modelo real.
 
 | Archivo | Rol |
 |---|---|
-| `offline/script.ts` | `siguientePaso(historial)`: decide qué herramientas llamar o qué responder, solo a partir del historial. Las llamadas sin dependencias salen en lote, como haría un modelo con llamadas paralelas. |
+| `offline/script.ts` | `siguientePaso(historial)`: decide qué herramienta `recepcion_*` llamar o qué responder, solo a partir del historial. |
 | `offline/history.ts` | Lee el historial: ejecuciones previas (emparejadas por posición) y último mensaje del usuario. |
 | `offline/replies.ts` | Redacta respuestas citando solo resultados de herramientas (CA2). |
 
-Cubre el guion del PRD §11: procesar el buzón, dejar `msg-006` en revisión, registrar tras «confirmo …». Fuera del guion responde con ayuda.
+Cubre el guion del PRD §11 (procesar el buzón, dejar `msg-006` en revisión, registrarlo tras «confirmo …») y además «rechaza msg-006 porque …», «estado del buzón», «explica msg-00x», «busca CT-… en el maestro» y «alertas al YYYY-MM-DD». Fuera del guion responde con ayuda.
 
 ## Agregar un proveedor
 

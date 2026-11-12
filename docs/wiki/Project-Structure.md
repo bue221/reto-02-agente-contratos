@@ -42,22 +42,25 @@ api/src/
 ├── knowledge/
 │   └── registro-contratos.md  conocimiento del proceso (PRD)
 ├── tools/
-│   ├── contratos.ts           las 5 herramientas, su registro y ejecutarHerramienta (PRD)
-│   └── tool.ts                definirHerramienta: zod + ejecutar sin lanzar + log; ContextoHerramienta
+│   ├── contratos.ts           las 5 herramientas del proceso que llama el motor (PRD)
+│   ├── recepcion.ts           las 5 herramientas que ve el modelo: 3 de lectura, procesar y responder revisión
+│   ├── args.ts                esquemas de argumentos compartidos (MensajeIdSchema)
+│   └── tool.ts                definirHerramienta (zod + sin lanzar + log), registroDeHerramientas, ContextoHerramienta
 ├── agent/
-│   ├── loop.ts                AgenteContratos: ciclo del turno, topes, cierre con needsConfirmation
-│   ├── execution.ts           ejecutarLlamada: guarda CA3 y anotación de confirmaciones del chat
-│   ├── model-tools.ts         definiciones que ve el modelo (JSON Schema desde zod)
+│   ├── loop.ts                AgenteContratos: ciclo ReAct de la recepcionista, topes, needsConfirmation
+│   ├── execution.ts           ejecutarLlamada: guarda CA3, pasos del motor y efecto en pendientes
+│   ├── model-tools.ts         definiciones que ve el modelo: solo recepcion_* (JSON Schema desde zod)
 │   ├── prompt.ts              lee agent/prompt.md + conocimiento en cada turno
 │   ├── sessions.ts            SesionesEnArchivo (memoria + out/sesiones/) y CerrojoPorSesion
+│   ├── turn.ts                cierre del turno (CA3, pregunta forzada, topes): lo comparten loop.ts y studio/
 │   └── module-bundle.ts       contenido esperado de modulo/agent.md y SKILL.md
 ├── llm/
 │   ├── adapter.ts             interfaz ProveedorLlm y tipos de mensajes (PRD)
 │   ├── factory.ts             crearProveedor(config): único punto que conoce las implementaciones
 │   ├── gemini.ts              ProveedorGemini: REST generateContent con fetch
-│   ├── offline.ts             ProveedorOffline: guion determinista, 0 tokens
+│   ├── offline.ts             ProveedorOffline: recepcionista con guion determinista, 0 tokens
 │   └── offline/
-│       ├── script.ts          siguientePaso(historial): qué herramientas llamar o qué responder
+│       ├── script.ts          siguientePaso(historial): qué herramienta recepcion_* llamar o qué responder
 │       ├── history.ts         lectura del historial (ejecuciones previas, último mensaje del usuario)
 │       └── replies.ts         redacción de respuestas con datos de herramientas
 ├── http/
@@ -73,12 +76,15 @@ api/src/
 │   │   ├── register.ts        HU-4: revalidar, exigir confirmación, escribir fila, archivar, historial
 │   │   ├── alerts.ts          HU-5: out/alertas.md (vencimientos, pólizas, registrados desde el corte)
 │   │   ├── message-status.ts  estado de cada mensaje derivado de out/ (una sola verdad)
-│   │   ├── mailbox-view.ts    vistas de solo lectura del buzón, detalle y bandeja
+│   │   ├── mailbox-view.ts    vistas de solo lectura del buzón, detalle, explicación y bandeja
+│   │   ├── master-query.ts    búsqueda en el maestro por id, cliente o NIT
 │   │   ├── timeline.ts        los 7 pasos de un correo para el detalle del buzón
 │   │   └── reset-demo.ts      vacía out/ y vuelve a copiar el maestro
-│   └── workflows/
-│       ├── process-mailbox.ts pasada extraer → validar → registrar (demo.ts, tests, botón Analizar)
-│       └── approval-tray.ts   procesar, aprobar con correcciones y rechazar desde la bandeja
+│   └── workflows/             motor determinista
+│       ├── contract-graph.ts  grafo de un mensaje (tabla NODOS + ARISTAS): extraer → validar → decidir → registrar | esperar_revision | cerrar
+│       ├── process-mailbox.ts pasada: ingestar → grafo por mensaje → alertas (chat, demo.ts, tests)
+│       ├── approval-tray.ts   reanudación tras la pausa: aprobar con correcciones o rechazar (chat y bandeja)
+│       └── tool-call.ts       llamarHerramienta: única puerta a contratos_*, con traza para el chat
 ├── core/
 │   ├── domain/
 │   │   ├── contract.ts        ContratoSchema (campo = valor + confianza + evidencia), Correcciones
@@ -148,17 +154,35 @@ api/tests/
 │   └── llm.test.ts            adaptador Gemini y selección de proveedor (8)
 └── integration/
     ├── tools.test.ts          herramientas, buzón completo, RN5, alertas, zod (21)
-    ├── agent.test.ts          ciclo con offline y proveedores falsos, CA1–CA5 (13)
+    ├── agent.test.ts          ciclo de la recepcionista con offline y proveedores falsos, CA1–CA5 (15)
+    ├── receptionist.test.ts   herramientas recepcion_* y grafo del motor (13)
     ├── api.test.ts            API del chat, errores, CORS (9)
     ├── approval-tray.test.ts  buzón, bandeja, chat ↔ bandeja, reinicio (16)
     └── module.test.ts         sincronía de modulo/ (4)
 ```
+
+## `studio/` (solo desarrollo)
+
+```
+studio/
+├── package.json, tsconfig.json   LangGraph.js y su CLI como devDependencies; scripts studio, test, typecheck
+├── langgraph.json                grafos recepcionista y motor; carga ../.env
+├── src/
+│   ├── receptionist-graph.ts     __start__ → recepcionista ⇄ herramientas → __end__
+│   ├── engine-graph.ts           ingestar → por mensaje NODOS de contract-graph.ts → alertas → revision_humana (interrupt)
+│   ├── messages.ts               mensajes de LangChain ↔ MensajeLlm
+│   └── project.ts                dependencias por entorno (raíz, proveedor, tope de iteraciones)
+└── tests/graphs.test.ts          ambos grafos sobre un proyecto temporal (4)
+```
+
+Ver [LangGraph Studio](Studio.md).
 
 ## `modulo/`
 
 ```
 modulo/
 ├── agent.md                         generado desde agent/prompt.md
-├── tools/contratos.ts               reexporta api/src/tools/contratos.ts
+├── tools/recepcion.ts               reexporta api/src/tools/recepcion.ts (lo que ve el agente)
+├── tools/contratos.ts               reexporta api/src/tools/contratos.ts (lo que llama el motor)
 └── skill/registro-contratos/SKILL.md generado desde api/src/knowledge/registro-contratos.md
 ```
