@@ -1,0 +1,112 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths: &rutas-backend
+      - "src/**"
+      - "tests/**"
+      - "agent/**"
+      - "modulo/**"
+      - "scripts/**"
+      - "fixtures/**"
+      - "demo.ts"
+      - "package.json"
+      - "bun.lock"
+      - "tsconfig.json"
+      # La imagen de despliegue compila el front y comparte src/api/tipos.ts con él.
+      - "web/**"
+      - "Dockerfile"
+      - "Dockerfile.dockerignore"
+      - ".github/workflows/backend.yml"
+  pull_request:
+    paths: *rutas-backend
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUN_VERSION: 1.4.4
+  # CI nunca llama a Gemini: el proveedor offline es determinista y no necesita secretos.
+  LLM_PROVIDER: offline
+
+jobs:
+  verificar:
+    name: Typecheck, tests y demo
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache de dependencias
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Instalar dependencias
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck del backend
+        run: bunx tsc --noEmit -p .
+
+      - name: Módulo sincronizado con agent/ y el conocimiento
+        run: bun run sync:modulo --check
+
+      - name: Tests
+        run: bun test
+
+      - name: Demo sin modelo (smoke)
+        run: bun run demo
+
+  imagen:
+    name: Imagen Docker y health check
+    needs: verificar
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      IMAGEN: agente-contratos:ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Construir imagen
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.IMAGEN }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Levantar contenedor y esperar /api/health
+        run: |
+          docker run -d --name api -p 3000:3000 -e LLM_PROVIDER "$IMAGEN"
+          for intento in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/api/health; then
+              echo
+              echo "API sana tras $intento intento(s)"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::/api/health no respondió en 30 s"
+          docker logs api
+          exit 1
+
+      - name: Logs del contenedor
+        if: always()
+        run: docker logs api || true
