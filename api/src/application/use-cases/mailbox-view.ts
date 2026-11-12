@@ -109,6 +109,16 @@ export async function detalleMensaje(rutas: Rutas, id: string): Promise<Resultad
   };
 }
 
+/** Lo que el chat necesita para explicar un mensaje: sin el texto completo de los adjuntos ni el log crudo. */
+export type ExplicacionMensaje = Omit<DetalleMensaje, "cuerpo" | "adjuntos" | "log" | "historial">;
+
+export async function explicarMensaje(rutas: Rutas, id: string): Promise<ResultadoHitl<ExplicacionMensaje>> {
+  const detalle = await detalleMensaje(rutas, id);
+  if (!detalle.ok) return detalle;
+  const { cuerpo: _cuerpo, adjuntos: _adjuntos, log: _log, historial: _historial, ...explicacion } = detalle.data;
+  return { ok: true, data: explicacion };
+}
+
 async function itemBandeja(rutas: Rutas, id: string, out: EstadoOut): Promise<ItemBandeja | null> {
   const analisis = esperaConfirmacion(out, id);
   if (!analisis) return null;

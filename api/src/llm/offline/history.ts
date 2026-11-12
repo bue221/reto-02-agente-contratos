@@ -1,4 +1,3 @@
-import { PREFIJO_REQUIERE_REVISION } from "../../application/use-cases/register.ts";
 import type { Resultado } from "../../core/domain/result.ts";
 import type { MensajeLlm } from "../adapter.ts";
 
@@ -48,6 +47,3 @@ export function buscar<T>(lista: readonly Ejecucion[], nombre: string, mensajeId
   const encontrada = lista.findLast((ejecucion) => ejecucion.nombre === nombre && (mensajeId === null || mensajeIdDe(ejecucion) === mensajeId));
   return encontrada?.resultado as Resultado<T> | undefined;
 }
-
-export const esPendienteDeRevision = (resultado: Resultado<unknown>): boolean =>
-  !resultado.ok && resultado.error.startsWith(PREFIJO_REQUIERE_REVISION);

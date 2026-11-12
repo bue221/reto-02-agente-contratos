@@ -200,7 +200,7 @@ describe("chat y bandeja comparten la misma verdad", () => {
     await chat(app, "c2", PROMPT_DEMO);
     await post(app, "/api/bandeja/msg-006/aprobar", { aprobador: "Ana", correcciones: CORRECCIONES_006 });
     const respuesta = (await chat(app, "c2", CONFIRMACION)).json;
-    expect(respuesta.toolCalls[0]).toMatchObject({ nombre: "contratos_registrar", ok: false });
+    expect(respuesta.toolCalls[0]).toMatchObject({ nombre: "recepcion_responder_revision", ok: false });
     expect(respuesta.toolCalls[0]?.resumen).toContain("ya fue procesado (registrado CM-2026-03)");
     expect((await pedir<SesionPublica>(app, "/api/sessions/c2")).json.pendientesConfirmacion).toEqual([]);
     const { json: maestro } = await pedir<RespuestaMaestro>(app, "/api/maestro");

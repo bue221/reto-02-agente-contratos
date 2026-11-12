@@ -3,8 +3,8 @@ import type { DefinicionHerramienta, MensajeLlm, ProveedorLlm, RespuestaLlm } fr
 import { siguientePaso } from "./offline/script.ts";
 
 /**
- * Proveedor sin modelo: recorre las herramientas con un guion determinista (PRD 11) para probar
- * la app completa sin clave. Reporta 0 tokens porque no consume ningún servicio.
+ * Proveedor sin modelo: hace de recepcionista con un guion determinista (PRD 11) sobre las mismas
+ * herramientas `recepcion_*` para probar la app completa sin clave. Reporta 0 tokens.
  */
 export class ProveedorOffline implements ProveedorLlm {
   readonly nombre = "offline";

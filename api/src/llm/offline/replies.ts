@@ -1,58 +1,39 @@
 import type { Alertas } from "../../application/use-cases/alerts.ts";
-import type { Registro } from "../../application/use-cases/register.ts";
-import type { ValidacionReportada } from "../../application/use-cases/validate.ts";
-import type { Contrato } from "../../core/domain/contract.ts";
-import type { Resultado } from "../../core/domain/result.ts";
-import { type Ejecucion, buscar, esPendienteDeRevision } from "./history.ts";
+import type { ExplicacionMensaje } from "../../application/use-cases/mailbox-view.ts";
+import type { ConsultaMaestro } from "../../application/use-cases/master-query.ts";
+import type { RespuestaBuzon } from "../../http/types.ts";
+import type { DecisionReportada, PasadaReportada } from "../../tools/recepcion.ts";
 
 /** Redacción de las respuestas del guion offline: todo valor citado sale de un resultado de herramienta (CA2). */
 
-const EXTRAER = "contratos_extraer";
-const VALIDAR = "contratos_validar";
-const REGISTRAR = "contratos_registrar";
+type MensajeReportado = PasadaReportada["mensajes"][number];
 
-function accionDe(validacion: Resultado<ValidacionReportada> | undefined, registro: Resultado<Registro> | undefined): string {
-  if (registro?.ok) return `${registro.data.accion} ${registro.data.id_contrato ?? ""}`.trim();
-  if (registro && esPendienteDeRevision(registro)) return "**pendiente de tu confirmación**";
-  if (registro && !registro.ok) return `sin registrar: ${registro.error}`;
-  if (!validacion?.ok) return `error: ${validacion?.ok === false ? validacion.error : "sin validar"}`;
-  return `sin escritura: ${validacion.data.motivo ?? validacion.data.clasificacion}`;
+const accionDe = (mensaje: MensajeReportado): string => (mensaje.desenlace === "en_revision" ? "**pendiente de tu confirmación**" : mensaje.accion);
+
+export function tablaDePasada(mensajes: readonly MensajeReportado[]): string {
+  const filas = mensajes.map(
+    (mensaje) => `| ${mensaje.mensaje_id} | ${mensaje.clasificacion ?? "error"} | ${mensaje.requiere_revision.join(", ") || "—"} | ${accionDe(mensaje)} |`,
+  );
+  return ["| Mensaje | Clasificación | Requiere revisión | Acción |", "|---|---|---|---|", ...filas].join("\n");
 }
 
-function filaDeTabla(turno: readonly Ejecucion[], id: string): string {
-  const extraido = buscar<Contrato>(turno, EXTRAER, id);
-  const validacion = buscar<ValidacionReportada>(turno, VALIDAR, id);
-  const registro = buscar<Registro>(turno, REGISTRAR, id);
-  const clasificacion = validacion?.ok ? validacion.data.clasificacion : extraido?.ok === false ? `error: ${extraido.error}` : "—";
-  const revision = validacion?.ok ? validacion.data.requiere_revision.join(", ") || "—" : "—";
-  return `| ${id} | ${clasificacion} | ${revision} | ${accionDe(validacion, registro)} |`;
-}
-
-export function tablaDeMensajes(turno: readonly Ejecucion[], ids: readonly string[]): string {
-  return ["| Mensaje | Clasificación | Requiere revisión | Acción |", "|---|---|---|---|", ...ids.map((id) => filaDeTabla(turno, id))].join("\n");
-}
-
-function lineaDeCampo(contrato: Contrato, campo: ValidacionReportada["requiere_revision"][number]): string {
-  const { valor, confianza, evidencia } = contrato[campo];
-  const cita = evidencia ? ` — evidencia: "${evidencia}"` : "";
-  return `- **${campo}**: ${JSON.stringify(valor)} (confianza ${confianza})${cita}`;
-}
-
-export function detalleDeRevision(turno: readonly Ejecucion[], id: string): string {
-  const extraido = buscar<Contrato>(turno, EXTRAER, id);
-  const validacion = buscar<ValidacionReportada>(turno, VALIDAR, id);
-  if (!extraido?.ok || !validacion?.ok) return `### ${id}\nNo tengo la extracción de este mensaje.`;
-  const campos = validacion.data.requiere_revision.map((campo) => lineaDeCampo(extraido.data, campo));
-  const avisos = validacion.data.avisos.map((aviso) => `- aviso: ${aviso}`);
-  return [`### ${id} (${extraido.data.id_contrato.valor ?? "sin número"}) requiere revisión`, ...campos, ...avisos].join("\n");
+export function detalleDeRevision(mensaje: MensajeReportado): string {
+  const campos = mensaje.revision.map(({ campo, valor, confianza, evidencia, motivo }) => {
+    const cita = evidencia ? ` — evidencia: "${evidencia}"` : "";
+    // El motivo de baja confianza ya cita la confianza; los conflictos con el maestro no.
+    const porque = motivo.startsWith("confianza") ? motivo : `confianza ${confianza}; ${motivo}`;
+    return `- **${campo}**: ${JSON.stringify(valor)} (${porque})${cita}`;
+  });
+  const avisos = mensaje.avisos.map((aviso) => `- aviso: ${aviso}`);
+  return [`### ${mensaje.mensaje_id} (${mensaje.id_contrato ?? "sin número"}) requiere revisión`, ...campos, ...avisos].join("\n");
 }
 
 const listar = (elementos: readonly string[], vacio: string): string => elementos.join(", ") || vacio;
 
-export function resumenDeAlertas(alertas: Resultado<Alertas> | undefined): string {
+export function resumenDeAlertas(alertas: Alertas | { error: string } | null): string {
   if (!alertas) return "";
-  if (!alertas.ok) return `### Alertas\nNo pude generar el reporte: ${alertas.error}`;
-  const { ruta, vencen, polizas_pendientes, registrados_desde_corte } = alertas.data;
+  if ("error" in alertas) return `### Alertas\nNo pude generar el reporte: ${alertas.error}`;
+  const { ruta, vencen, polizas_pendientes, registrados_desde_corte } = alertas;
   return [
     `### Alertas (${ruta})`,
     `- Vencen en ≤ 60 días: ${listar(vencen.map((v) => `${v.id_contrato} (${v.dias_restantes} d)`), "ninguno")}`,
@@ -62,11 +43,61 @@ export function resumenDeAlertas(alertas: Resultado<Alertas> | undefined): strin
 }
 
 export function preguntaDeConfirmacion(ids: readonly string[]): string {
-  return `Responde «confirmo …» (por ejemplo, «confirmo el valor 0 y la fecha fin 2027-08-31») o indícame la corrección. ¿Confirmas los campos en revisión de ${ids.join(", ")}?`;
+  return `Responde «confirmo …» (por ejemplo, «confirmo el valor 0 y la fecha fin 2027-08-31»), indícame la corrección o «rechaza ${ids[0] ?? "msg-…"} porque …». ¿Confirmas los campos en revisión de ${ids.join(", ")}?`;
+}
+
+export function cierreDePasada(pasada: PasadaReportada): string {
+  const { mensajes, omitidos, en_revision, alertas } = pasada;
+  if (mensajes.length === 0 && omitidos.length === 0) return ["El buzón no tiene mensajes pendientes.", resumenDeAlertas(alertas)].join("\n\n");
+  const partes = [
+    mensajes.length > 0 ? `El motor procesó ${mensajes.length} mensajes:` : "",
+    mensajes.length > 0 ? tablaDePasada(mensajes) : "",
+    ...omitidos.map((omitido) => `- ${omitido.mensaje_id}: ${omitido.motivo}`),
+    ...mensajes.filter((mensaje) => mensaje.desenlace === "en_revision").map(detalleDeRevision),
+    resumenDeAlertas(alertas),
+  ];
+  if (en_revision.length > 0) partes.push(`No registré nada dudoso. ${preguntaDeConfirmacion(en_revision)}`);
+  return partes.filter(Boolean).join("\n\n");
+}
+
+export function describirDecision(decision: DecisionReportada): string {
+  if (decision.decision === "rechazado") return `- ${decision.mensaje_id}: rechazado, sin escritura en el maestro`;
+  return `- ${decision.mensaje_id}: ${decision.accion ?? "sin escritura"} ${decision.id_contrato ?? ""}`.trimEnd();
+}
+
+export function tablaDeEstado(buzon: RespuestaBuzon): string {
+  const { total, pendientes, requiere_revision, procesados } = buzon.contadores;
+  const filas = buzon.mensajes.map((mensaje) => `| ${mensaje.id} | ${mensaje.estado} | ${mensaje.clasificacion ?? "—"} | ${mensaje.id_contrato ?? "—"} |`);
+  return [
+    `Buzón: ${total} mensajes, ${pendientes} pendientes, ${requiere_revision} en revisión, ${procesados} procesados.`,
+    ["| Mensaje | Estado | Clasificación | Contrato |", "|---|---|---|---|", ...filas].join("\n"),
+  ].join("\n\n");
+}
+
+export function tablaDeMaestro(consulta: ConsultaMaestro): string {
+  if (consulta.total === 0) return "No encontré contratos en el maestro con esa búsqueda.";
+  const filas = consulta.filas.map((fila) => `| ${fila.id_contrato} | ${fila.cliente} | ${fila.fecha_fin} | ${fila.valor} ${fila.moneda} | ${fila.estado_poliza} |`);
+  const truncado = consulta.truncado ? `\n\nSe muestran ${consulta.filas.length} de ${consulta.total}: afina la búsqueda.` : "";
+  return `${["| Contrato | Cliente | Fecha fin | Valor | Póliza |", "|---|---|---|---|---|", ...filas].join("\n")}${truncado}`;
+}
+
+export function explicacion(detalle: ExplicacionMensaje): string {
+  const { mensaje, validacion, extraccion, decision } = detalle;
+  if (!validacion || !extraccion) return `${mensaje.id} está **${mensaje.estado}**: aún no lo ha analizado el motor. Pídeme que lo procese.`;
+  const revisiones = validacion.revisiones.map(({ campo, motivo }) => `- **${campo}**: ${JSON.stringify(extraccion[campo].valor)} — ${motivo}`);
+  const decidido = decision ? `Decisión: ${decision.decision} por ${decision.aprobador} (${decision.via}).` : "";
+  return [
+    `${mensaje.id} está **${mensaje.estado}**; clasificación **${validacion.clasificacion}**${validacion.motivo ? ` (${validacion.motivo})` : ""}.`,
+    revisiones.length > 0 ? `Campos en revisión:\n${revisiones.join("\n")}` : "Sin campos en revisión.",
+    ...validacion.avisos.map((aviso) => `- aviso: ${aviso}`),
+    decidido,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 export const AYUDA_OFFLINE = [
-  "Estoy en **modo sin modelo** (proveedor offline): sigo un guion determinista sobre las mismas herramientas.",
-  "Puedo: «procesa el buzón con fecha de hoy 2026-09-03», «genera las alertas al 2026-09-03» y, cuando pida confirmación, «confirmo el valor 0 y la fecha fin 2027-08-31».",
+  "Estoy en **modo sin modelo** (proveedor offline): sigo un guion determinista sobre las mismas herramientas de la recepcionista.",
+  "Puedo: «procesa el buzón con fecha de hoy 2026-09-03», «¿cuál es el estado del buzón?», «explica msg-006», «busca CT-2026-009 en el maestro», «genera las alertas al 2026-09-03» y, cuando pida confirmación, «confirmo el valor 0 y la fecha fin 2027-08-31» o «rechaza msg-006 porque falta la firma».",
   "Para conversación libre configura `GOOGLE_API_KEY` en el backend.",
 ].join("\n\n");

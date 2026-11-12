@@ -8,7 +8,7 @@ export interface DecisionHumana {
   ts: string;
   mensaje_id: string;
   decision: "aprobado" | "rechazado";
-  via: "bandeja" | "chat";
+  via: "bandeja" | "chat" | "studio";
   aprobador: string;
   correcciones: Correcciones;
   motivo: string | null;

@@ -58,6 +58,7 @@ export function leerConfiguracion(entorno: Record<string, string | undefined> = 
     maxTokensProceso: e.MAX_TOKENS_PROCESO,
     puerto: e.PORT,
     origenesCors: (e.CORS_ORIGINS ?? "").split(",").map((origen) => origen.trim()).filter(Boolean),
-    directorio: join(import.meta.dir, "..", ".."),
+    // `dirname` (no `dir`, exclusivo de Bun) para que también cargue bajo Node en el servidor de LangGraph Studio.
+    directorio: join(import.meta.dirname, "..", ".."),
   };
 }

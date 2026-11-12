@@ -8,16 +8,12 @@ import { ContratoSchema } from "../core/domain/contract.ts";
 import { fechaDeHoy } from "../core/domain/dates.ts";
 import { FechaIsoSchema } from "../core/domain/master.ts";
 import { UMBRAL_CONFIANZA } from "../core/domain/parameters.ts";
-import { type ContextoHerramienta, type HerramientaGenerica, definirHerramienta, herramientaDesconocida, resumirResultado } from "./tool.ts";
+import { MensajeIdSchema } from "./args.ts";
+import { type ContextoHerramienta, type HerramientaGenerica, definirHerramienta, registroDeHerramientas } from "./tool.ts";
 
 /** El modelo ve cada export como `contratos_<export>` (PRD 6.2). */
 export const PREFIJO = "contratos";
 const nombre = (exportado: string): string => `${PREFIJO}_${exportado}`;
-
-const MensajeIdSchema = z
-  .string()
-  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, "solo letras, números, '-' y '_'")
-  .describe("Id del mensaje del buzón, p. ej. msg-001");
 
 const ContratoArgSchema = ContratoSchema.describe(
   "Contrato tal como lo devolvió contratos_extraer; si el usuario corrige un campo, cambia solo su valor",
@@ -87,21 +83,13 @@ export const herramientas: Readonly<Record<string, HerramientaGenerica>> = {
   [nombre("alertas")]: alertas,
 };
 
-const buscarHerramienta = (nombreHerramienta: string): HerramientaGenerica | undefined =>
-  herramientas[nombreHerramienta] ?? herramientas[nombre(nombreHerramienta)];
+const registro = registroDeHerramientas(PREFIJO, herramientas);
 
-/**
- * Punto de entrada del ciclo del agente: acepta `contratos_<export>` o `<export>` y argumentos crudos del modelo.
- * Los argumentos se validan con zod dentro de cada herramienta y el error vuelve como `{ ok: false, error }`.
- */
+/** Punto de entrada del motor determinista, `demo.ts` y el módulo: el modelo del chat no llama estas herramientas directamente. */
 export function ejecutarHerramienta(nombreHerramienta: string, args: unknown, ctx: ContextoHerramienta): Promise<string> {
-  const herramienta = buscarHerramienta(nombreHerramienta);
-  if (!herramienta) return herramientaDesconocida(nombreHerramienta, ctx, Object.keys(herramientas));
-  return herramienta.execute(args, ctx);
+  return registro.ejecutar(nombreHerramienta, args, ctx);
 }
 
-/** Resumen de una ejecución para el historial del chat; si la herramienta no existe, el propio error. */
 export function resumirEjecucion(nombreHerramienta: string, json: string): string {
-  const herramienta = buscarHerramienta(nombreHerramienta);
-  return herramienta ? resumirResultado(herramienta, json) : (JSON.parse(json) as { error?: string }).error ?? json;
+  return registro.resumir(nombreHerramienta, json);
 }

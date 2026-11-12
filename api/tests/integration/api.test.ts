@@ -69,7 +69,9 @@ describe("API del chat", () => {
     const chat = (await respuesta.json()) as RespuestaChat;
     expect(chat.needsConfirmation).toBe(true);
     expect(chat.reply).toContain("msg-006");
-    expect(chat.toolCalls[0]).toEqual({ nombre: "contratos_leer_buzon", args: {}, ok: true, resumen: "6 pendientes: msg-001, msg-002, msg-003, msg-004, msg-005, msg-006" });
+    expect(chat.toolCalls).toHaveLength(1);
+    expect(chat.toolCalls[0]).toMatchObject({ nombre: "recepcion_procesar_buzon", args: { hoy: "2026-09-03" }, ok: true });
+    expect(chat.toolCalls[0]?.pasos?.[0]).toEqual({ nombre: "contratos_leer_buzon", args: {}, ok: true, resumen: "6 pendientes: msg-001, msg-002, msg-003, msg-004, msg-005, msg-006" });
   });
 
   test("GET /api/sessions/:id devuelve el historial y 404 si no existe", async () => {

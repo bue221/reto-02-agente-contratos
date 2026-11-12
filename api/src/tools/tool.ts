@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { LlamadaVisible } from "../http/types.ts";
 import { registrarLog } from "../infrastructure/logs.ts";
 import { type Rutas, rutasDelProyecto } from "../infrastructure/paths.ts";
 import { type Resultado, fallo, mensajeDeError } from "../core/domain/result.ts";
@@ -9,6 +10,8 @@ export interface ContextoHerramienta {
   sessionId: string;
   /** Fecha de registro inyectable (YYYY-MM-DD) para que la demo y los tests sean deterministas. */
   hoy?: string;
+  /** Llamadas que hace el motor determinista por debajo de una herramienta del chat: se muestran anidadas (CA4). */
+  traza?: LlamadaVisible[];
 }
 
 /** Forma que exige el PRD 6.2. `execute` nunca lanza y siempre devuelve `{ ok, data | error }` serializado. */
@@ -91,8 +94,32 @@ export function definirHerramienta<A extends z.ZodRawShape, T>(definicion: Defin
   return herramienta;
 }
 
-export async function herramientaDesconocida(nombre: string, ctx: ContextoHerramienta, disponibles: string[]): Promise<string> {
+async function herramientaDesconocida(nombre: string, ctx: ContextoHerramienta, disponibles: string[]): Promise<string> {
   const error = `herramienta desconocida: "${nombre}" (disponibles: ${disponibles.join(", ")})`;
   await registrarLogSinLanzar(rutasDelProyecto(ctx.directory), nombre, null, error, false);
   return JSON.stringify(fallo(error));
+}
+
+/** Conjunto cerrado de herramientas: fuera de él no se ejecuta nada, aunque el modelo invente un nombre. */
+export interface RegistroHerramientas {
+  readonly herramientas: Readonly<Record<string, HerramientaGenerica>>;
+  /** Acepta `<prefijo>_<export>` o `<export>`; los argumentos crudos se validan con zod dentro de cada herramienta. */
+  ejecutar(nombre: string, args: unknown, ctx: ContextoHerramienta): Promise<string>;
+  /** Resumen de una ejecución para el chat; si la herramienta no existe, el propio error. */
+  resumir(nombre: string, json: string): string;
+}
+
+export function registroDeHerramientas(prefijo: string, herramientas: Readonly<Record<string, HerramientaGenerica>>): RegistroHerramientas {
+  const buscar = (nombre: string): HerramientaGenerica | undefined => herramientas[nombre] ?? herramientas[`${prefijo}_${nombre}`];
+  return {
+    herramientas,
+    ejecutar(nombre, args, ctx) {
+      const herramienta = buscar(nombre);
+      return herramienta ? herramienta.execute(args, ctx) : herramientaDesconocida(nombre, ctx, Object.keys(herramientas));
+    },
+    resumir(nombre, json) {
+      const herramienta = buscar(nombre);
+      return herramienta ? resumirResultado(herramienta, json) : ((JSON.parse(json) as { error?: string }).error ?? json);
+    },
+  };
 }

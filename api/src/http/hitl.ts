@@ -52,12 +52,12 @@ export function rutasHitl(app: Hono, deps: DependenciasHitl): void {
   app.post("/api/bandeja/:id/aprobar", async (c) => {
     const cuerpo = await leerCuerpo(c, PeticionAprobarSchema);
     if (!cuerpo.ok) return cuerpo.respuesta;
-    return responder(c, await decidir(() => aprobar(ctx, c.req.param("id"), cuerpo.data)));
+    return responder(c, await decidir(() => aprobar(ctx, c.req.param("id"), { ...cuerpo.data, via: "bandeja" })));
   });
   app.post("/api/bandeja/:id/rechazar", async (c) => {
     const cuerpo = await leerCuerpo(c, PeticionRechazarSchema);
     if (!cuerpo.ok) return cuerpo.respuesta;
-    return responder(c, await decidir(() => rechazar(ctx, c.req.param("id"), cuerpo.data)));
+    return responder(c, await decidir(() => rechazar(ctx, c.req.param("id"), { ...cuerpo.data, via: "bandeja" })));
   });
 
   app.get("/api/maestro.csv", async (c) => {

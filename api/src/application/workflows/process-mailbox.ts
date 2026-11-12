@@ -1,67 +1,85 @@
+import type { Alertas } from "../use-cases/alerts.ts";
 import type { Buzon } from "../use-cases/read-mailbox.ts";
-import type { Registro } from "../use-cases/register.ts";
-import type { ValidacionReportada } from "../use-cases/validate.ts";
-import type { Contrato } from "../../core/domain/contract.ts";
-import type { Resultado } from "../../core/domain/result.ts";
-import { ejecutarHerramienta } from "../../tools/contratos.ts";
+import { type Resultado, exito } from "../../core/domain/result.ts";
 import type { ContextoHerramienta } from "../../tools/tool.ts";
+import { type ResultadoMensaje, ejecutarGrafoMensaje, mensajeConError } from "./contract-graph.ts";
+import { llamarHerramienta } from "./tool-call.ts";
 
-/** Pasada determinista por el buzón usando solo las herramientas (sin modelo): la usan `demo.ts` y los tests. */
+/**
+ * Pasada del motor determinista por el buzón (lo que dispara `recepcion_procesar_buzon`):
+ *
+ *   ingestar (contratos_leer_buzon) ─▶ grafo de cada mensaje ─▶ alertas (contratos_alertas)
+ *
+ * El orden, las herramientas y las aristas están fijos aquí; el modelo solo decide cuándo disparar la pasada.
+ */
 
-export interface ResultadoMensaje {
+export type { ResultadoMensaje } from "./contract-graph.ts";
+
+export interface Omitido {
   mensaje_id: string;
-  clasificacion: ValidacionReportada["clasificacion"] | null;
-  requiere_revision: string[];
-  accion: string;
-  avisos: string[];
-  contrato: Contrato | null;
+  motivo: string;
 }
 
-/** Las herramientas devuelven JSON propio con forma `Resultado<T>`; el tipo lo fija quien llama. */
-export async function llamarHerramienta<T>(nombre: string, args: unknown, ctx: ContextoHerramienta): Promise<Resultado<T>> {
-  return JSON.parse(await ejecutarHerramienta(nombre, args, ctx)) as Resultado<T>;
+export interface Recorrido {
+  mensajes: ResultadoMensaje[];
+  /** Ids pedidos que no estaban pendientes en el buzón. */
+  omitidos: Omitido[];
 }
 
-const describirRegistro = (registro: Registro): string =>
-  registro.accion === "duplicado" ? `sin escritura (duplicado de ${registro.id_contrato})` : `${registro.accion} ${registro.id_contrato} → ${registro.ruta_archivo}`;
-
-async function accionTrasValidar(mensajeId: string, contrato: Contrato, validacion: ValidacionReportada, ctx: ContextoHerramienta): Promise<string> {
-  if (validacion.clasificacion === "rechazado") return `rechazado: ${validacion.motivo}`;
-  if (validacion.clasificacion === "duplicado") return `sin escritura: ${validacion.motivo}`;
-  const registro = await llamarHerramienta<Registro>("contratos_registrar", { mensaje_id: mensajeId, contrato }, ctx);
-  return registro.ok ? describirRegistro(registro.data) : `sin registrar: ${registro.error}`;
+export interface Pasada extends Recorrido {
+  /** Mensajes pausados esperando una decisión humana (CA3). */
+  en_revision: string[];
+  alertas: Resultado<Alertas>;
 }
 
-const conError = (mensajeId: string, error: string, contrato: Contrato | null = null): ResultadoMensaje => ({
-  mensaje_id: mensajeId,
-  clasificacion: null,
-  requiere_revision: [],
-  accion: `error: ${error}`,
-  avisos: [],
-  contrato,
-});
-
-/** extraer → validar → registrar (sin confirmar). Un error se reporta en el resultado y nunca corta el lote. */
-export async function procesarMensaje(mensajeId: string, ctx: ContextoHerramienta): Promise<ResultadoMensaje> {
-  const extraido = await llamarHerramienta<Contrato>("contratos_extraer", { mensaje_id: mensajeId }, ctx);
-  if (!extraido.ok) return conError(mensajeId, extraido.error);
-  const validacion = await llamarHerramienta<ValidacionReportada>("contratos_validar", { mensaje_id: mensajeId, contrato: extraido.data }, ctx);
-  if (!validacion.ok) return conError(mensajeId, validacion.error, extraido.data);
-  return {
-    mensaje_id: mensajeId,
-    clasificacion: validacion.data.clasificacion,
-    requiere_revision: validacion.data.requiere_revision,
-    accion: await accionTrasValidar(mensajeId, extraido.data, validacion.data, ctx),
-    avisos: validacion.data.avisos,
-    contrato: extraido.data,
-  };
+export interface SolicitudPasada {
+  hoy: string;
+  /** Sin lista se procesa todo lo pendiente; con `[]` solo se regeneran las alertas. */
+  mensajeIds?: readonly string[];
 }
 
-export async function procesarBuzon(ctx: ContextoHerramienta): Promise<Resultado<ResultadoMensaje[]>> {
+export interface Ingesta {
+  ids: string[];
+  omitidos: Omitido[];
+  ilegibles: Buzon["errores"];
+}
+
+/** Nodo `ingestar`: qué mensajes entran al grafo, cuáles se pidieron sin estar pendientes y cuáles no se pudieron leer. */
+export async function ingestar(ctx: ContextoHerramienta, pedidos: readonly string[] | undefined): Promise<Resultado<Ingesta>> {
   const buzon = await llamarHerramienta<Buzon>("contratos_leer_buzon", {}, ctx);
   if (!buzon.ok) return buzon;
-  const resultados: ResultadoMensaje[] = [];
-  for (const mensaje of buzon.data.mensajes) resultados.push(await procesarMensaje(mensaje.id, ctx));
-  for (const { id, error } of buzon.data.errores) resultados.push(conError(id, error));
-  return { ok: true, data: resultados };
+  const pendientes = buzon.data.mensajes.map((mensaje) => mensaje.id);
+  if (pedidos === undefined) return exito({ ids: pendientes, omitidos: [], ilegibles: buzon.data.errores });
+  const unicos = [...new Set(pedidos)];
+  const ilegibles = buzon.data.errores.filter((error) => unicos.includes(error.id));
+  const conocidos = new Set([...pendientes, ...ilegibles.map((error) => error.id)]);
+  return exito({
+    ids: unicos.filter((id) => pendientes.includes(id)),
+    omitidos: unicos.filter((id) => !conocidos.has(id)).map((id) => ({ mensaje_id: id, motivo: "no está pendiente en el buzón (ya procesado o inexistente)" })),
+    ilegibles,
+  });
+}
+
+async function recorrerBuzon(ctx: ContextoHerramienta, pedidos?: readonly string[]): Promise<Resultado<Recorrido>> {
+  const ingesta = await ingestar(ctx, pedidos);
+  if (!ingesta.ok) return ingesta;
+  const mensajes: ResultadoMensaje[] = [];
+  // Secuencial a propósito: cada registro modifica el maestro contra el que se clasifica el siguiente.
+  for (const id of ingesta.data.ids) mensajes.push(await ejecutarGrafoMensaje(id, ctx));
+  for (const { id, error } of ingesta.data.ilegibles) mensajes.push(mensajeConError(id, error));
+  return exito({ mensajes, omitidos: ingesta.data.omitidos });
+}
+
+/** Primera pasada de `demo.ts` y los tests: sin alertas, que la demo genera al final. */
+export async function procesarBuzon(ctx: ContextoHerramienta): Promise<Resultado<ResultadoMensaje[]>> {
+  const recorrido = await recorrerBuzon(ctx);
+  return recorrido.ok ? exito(recorrido.data.mensajes) : recorrido;
+}
+
+export async function ejecutarPasada(ctx: ContextoHerramienta, solicitud: SolicitudPasada): Promise<Resultado<Pasada>> {
+  const recorrido = await recorrerBuzon(ctx, solicitud.mensajeIds);
+  if (!recorrido.ok) return recorrido;
+  const alertas = await llamarHerramienta<Alertas>("contratos_alertas", { hoy: solicitud.hoy }, ctx);
+  const en_revision = recorrido.data.mensajes.filter((mensaje) => mensaje.desenlace === "en_revision").map((mensaje) => mensaje.mensaje_id);
+  return exito({ ...recorrido.data, en_revision, alertas });
 }

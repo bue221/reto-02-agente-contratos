@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Contrato } from "../src/core/domain/contract.ts";
-import { llamarHerramienta } from "../src/application/workflows/process-mailbox.ts";
+import { llamarHerramienta } from "../src/application/workflows/tool-call.ts";
 import type { ContextoHerramienta } from "../src/tools/tool.ts";
 
 export const RAIZ = join(import.meta.dir, "..", "..");

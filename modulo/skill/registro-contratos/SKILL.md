@@ -10,15 +10,29 @@ description: Conocimiento del proceso de registro de contratos vigentes (reglas 
 
 El maestro de contratos estuvo congelado desde el **2026-05-30**: solo llegaban a administración los contratos con póliza. El buzón único `contratos@periferia-ficticia.com` recibe ahora **todo** contrato, con o sin póliza. El maestro vive en `out/sharepoint/maestro-contratos.csv` (copia del fixture, que es de solo lectura) y los documentos se archivan en `out/sharepoint/Contratos/<año_inicio>/<cliente-slug>/<id_contrato>.<ext>`.
 
-## Herramientas
+## Dos capas: recepcionista y motor
 
-| Herramienta | Para qué |
+La recepcionista (el agente del chat) solo tiene cinco herramientas `recepcion_*`: tres de lectura y dos que encienden o reanudan el **motor determinista**. El motor es el único que llama a las herramientas `contratos_*` del proceso, siempre en este orden:
+
+```
+ingestar (contratos_leer_buzon)
+  └─ por cada mensaje: extraer → validar → decidir ─┬─ registrar          nuevo / actualización sin campos dudosos
+                                                    ├─ esperar_revision   pausa: espera la decisión de la analista
+                                                    └─ cerrar             duplicado / rechazado
+alertas (contratos_alertas)
+```
+
+La pausa `esperar_revision` se reanuda con `recepcion_responder_revision` (o desde la bandeja): **aprobar** aplica las correcciones y llama a `contratos_registrar` con `confirmado: true`; **rechazar** cierra el mensaje sin tocar el maestro. En ambos casos se pueden regenerar las alertas.
+
+| Herramienta del motor | Para qué |
 |---|---|
 | `contratos_leer_buzon` | Mensajes no procesados con remitente, asunto, adjuntos y `tiene_contrato`. |
 | `contratos_extraer` | Datos del contrato con `confianza` por campo en [0, 1]; ausentes = `null` con confianza 0. |
 | `contratos_validar` | Clasificación (`nuevo`, `actualizacion`, `duplicado`, `rechazado`), `requiere_revision[]`, diferencias y avisos. |
 | `contratos_registrar` | Escribe/actualiza la fila, archiva el documento y deja historial. Con campos en revisión exige `confirmado: true`. |
 | `contratos_alertas` | Genera `out/alertas.md` para la fecha `hoy` indicada. |
+
+Cada mensaje procesado trae su `recorrido` (los nodos que visitó) y su `desenlace`: `registrado`, `en_revision`, `cerrado` o `error`.
 
 ## Reglas de negocio
 
@@ -39,7 +53,8 @@ El maestro de contratos estuvo congelado desde el **2026-05-30**: solo llegaban 
 ## Confianza y confirmación
 
 - El umbral de revisión es **0.8**. La confianza la calcula el servidor reextrayendo el documento: un valor que el modelo cambie respecto a la extracción queda con confianza 0 y solo pasa con confirmación.
-- Pedir confirmación significa: mostrar cada campo dudoso con su valor, confianza y evidencia, y **terminar el turno con una pregunta**. Se registra solo si el siguiente mensaje de la analista confirma o corrige los valores.
+- Pedir confirmación significa: mostrar cada campo dudoso con su valor, confianza y evidencia, y **terminar el turno con una pregunta**. Se registra solo si el siguiente mensaje de la analista confirma o corrige los valores; el servidor rechaza una decisión sobre un mensaje por el que no se preguntó en un turno anterior.
+- Un valor corregido por la analista queda con confianza 1 y la evidencia de quién lo fijó.
 - Un remitente que no está en `comerciales.json` se reporta como aviso pero no bloquea: la columna `comercial` guarda su correo hasta que se asigne un responsable.
 
 ## Alertas

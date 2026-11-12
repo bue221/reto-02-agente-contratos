@@ -15,7 +15,7 @@ export const agenteMd = (prompt: string, origen: string): string =>
   [
     "---",
     `${AVISO} Fuente: ${origen}`,
-    "description: Registra contratos vigentes desde el buzón único; extrae, valida contra el maestro, pide confirmación de lo dudoso y genera alertas.",
+    "description: Recepcionista del buzón único de contratos; consulta estado y maestro, enciende el motor determinista que extrae, valida, registra y alerta, y pide confirmación de lo dudoso.",
     "mode: primary",
     "permission:",
     "  edit: deny",

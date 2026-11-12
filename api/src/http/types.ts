@@ -8,6 +8,8 @@ export interface LlamadaVisible {
   args: Record<string, unknown>;
   ok: boolean;
   resumen: string;
+  /** Llamadas `contratos_*` que hizo el motor determinista por debajo de esta herramienta del chat. */
+  pasos?: LlamadaVisible[];
 }
 
 export interface RespuestaChat {
@@ -132,7 +134,7 @@ export interface DecisionVisible {
   ts: string;
   mensaje_id: string;
   decision: "aprobado" | "rechazado";
-  via: "bandeja" | "chat";
+  via: "bandeja" | "chat" | "studio";
   aprobador: string;
   correcciones: CorreccionesVisibles;
   motivo: string | null;

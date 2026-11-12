@@ -6,6 +6,8 @@ import { leerPiezas } from "../../src/agent/prompt.ts";
 import { UMBRAL_CONFIANZA } from "../../src/core/domain/parameters.ts";
 import * as herramientasApp from "../../src/tools/contratos.ts";
 import * as herramientasModulo from "../../../modulo/tools/contratos.ts";
+import * as recepcionApp from "../../src/tools/recepcion.ts";
+import * as recepcionModulo from "../../../modulo/tools/recepcion.ts";
 import { RAIZ } from "../helpers.ts";
 
 describe("módulo reutilizable (PRD 9.4)", () => {
@@ -23,6 +25,8 @@ describe("módulo reutilizable (PRD 9.4)", () => {
   test("las herramientas del módulo son las mismas instancias que usa la app", () => {
     expect(herramientasModulo.herramientas).toBe(herramientasApp.herramientas);
     expect(herramientasModulo.registrar).toBe(herramientasApp.registrar);
+    expect(recepcionModulo.herramientas).toBe(recepcionApp.herramientas);
+    expect(recepcionModulo.procesar_buzon).toBe(recepcionApp.procesar_buzon);
   });
 
   test("el conocimiento cita el mismo umbral de confianza que el código", async () => {

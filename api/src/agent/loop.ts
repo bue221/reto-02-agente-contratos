@@ -1,5 +1,3 @@
-import { leerProcesados } from "../infrastructure/logs.ts";
-import { rutasDelProyecto } from "../infrastructure/paths.ts";
 import type { LlamadaVisible, RespuestaChat } from "../http/types.ts";
 import { mensajeDeError } from "../core/domain/result.ts";
 import { type DefinicionHerramienta, type MensajeLlm, type ProveedorLlm, type RespuestaLlm, totalTokens } from "../llm/adapter.ts";
@@ -8,10 +6,12 @@ import { ejecutarLlamada } from "./execution.ts";
 import { definicionesParaModelo } from "./model-tools.ts";
 import { leerPromptSistema } from "./prompt.ts";
 import { type AlmacenSesiones, CerrojoPorSesion, type Sesion, nuevaSesion } from "./sessions.ts";
+import { cerrarPendientes, conPreguntaExplicita, errorDeProveedor, mensajeDeTope, pendientesVigentes } from "./turn.ts";
 
 /**
- * Ciclo del agente (PRD 6.3): prompt → modelo → herramientas → modelo … hasta una respuesta de texto.
- * Solo conoce `ProveedorLlm`: cambiar de proveedor no toca este archivo.
+ * Ciclo ReAct de la recepcionista (PRD 6.3): prompt → modelo → herramientas `recepcion_*` → modelo … hasta
+ * una respuesta de texto. El modelo decide cuándo consultar o encender el motor; el camino de cada contrato
+ * lo fija el motor determinista. Solo conoce `ProveedorLlm`: cambiar de proveedor no toca este archivo.
  */
 
 export interface LimitesCiclo {
@@ -41,7 +41,8 @@ interface Turno {
   llamadas: LlamadaVisible[];
   pendientesAlInicio: ReadonlySet<string>;
   nuevasPendientes: Set<string>;
-  registrados: Set<string>;
+  /** Mensajes que una decisión humana cerró en este turno (aprobados o rechazados). */
+  resueltos: Set<string>;
 }
 
 export class AgenteContratos {
@@ -65,7 +66,7 @@ export class AgenteContratos {
 
   async #turno(sessionId: string, mensaje: string): Promise<RespuestaChat> {
     const sesion = (await this.#deps.sesiones.obtener(sessionId)) ?? nuevaSesion(sessionId);
-    sesion.pendientesConfirmacion = await this.#pendientesVigentes(sesion.pendientesConfirmacion);
+    sesion.pendientesConfirmacion = await pendientesVigentes(this.#deps.directorio, sesion.pendientesConfirmacion);
     const turno = this.#iniciarTurno(sesion, mensaje);
     const texto = await this.#resolver(turno).catch((error: unknown) => `Ocurrió un error interno: ${mensajeDeError(error)}. Puedes volver a intentarlo.`);
     const respuesta = this.#cerrarTurno(turno, texto);
@@ -76,18 +77,6 @@ export class AgenteContratos {
     return respuesta;
   }
 
-  /** Un mensaje resuelto en otro canal (bandeja u otra sesión) deja de esperar confirmación aquí. */
-  async #pendientesVigentes(pendientes: readonly string[]): Promise<string[]> {
-    if (pendientes.length === 0) return [];
-    try {
-      const procesados = await leerProcesados(rutasDelProyecto(this.#deps.directorio));
-      return pendientes.filter((id) => !(id in procesados));
-    } catch (error) {
-      console.error(`[agente] no se pudo leer procesados.json: ${mensajeDeError(error)}`);
-      return [...pendientes];
-    }
-  }
-
   #iniciarTurno(sesion: Sesion, mensaje: string): Turno {
     sesion.mensajes.push({ rol: "usuario", texto: mensaje });
     return {
@@ -96,7 +85,7 @@ export class AgenteContratos {
       llamadas: [],
       pendientesAlInicio: new Set(sesion.pendientesConfirmacion),
       nuevasPendientes: new Set(),
-      registrados: new Set(),
+      resueltos: new Set(),
     };
   }
 
@@ -123,8 +112,8 @@ export class AgenteContratos {
       const ejecutada = await ejecutarLlamada(llamada, turno.ctx, turno.pendientesAlInicio);
       turno.sesion.mensajes.push({ rol: "herramienta", id: llamada.id, nombre: llamada.nombre, resultado: ejecutada.json });
       turno.llamadas.push(ejecutada.visible);
-      if (ejecutada.revision?.estado === "pendiente") turno.nuevasPendientes.add(ejecutada.revision.mensajeId);
-      if (ejecutada.revision?.estado === "registrado") turno.registrados.add(ejecutada.revision.mensajeId);
+      for (const id of ejecutada.efecto.enRevision) turno.nuevasPendientes.add(id);
+      for (const id of ejecutada.efecto.resueltos) turno.resueltos.add(id);
     }
   }
 
@@ -143,33 +132,12 @@ export class AgenteContratos {
     this.#tokensProceso += totalTokens(respuesta.uso);
   }
 
-  /** CA3 determinista: la confirmación se decide por los resultados de `registrar`, no por el texto del modelo. */
   #cerrarTurno(turno: Turno, texto: string): RespuestaChat {
-    const { sesion, registrados } = turno;
-    const nuevas = [...turno.nuevasPendientes].filter((id) => !registrados.has(id));
-    sesion.pendientesConfirmacion = [...new Set([...turno.pendientesAlInicio, ...nuevas])].filter((id) => !registrados.has(id));
-    const needsConfirmation = nuevas.length > 0;
-    const reply = needsConfirmation && !texto.endsWith("?") ? `${texto}\n\n${preguntaExplicita(nuevas)}` : texto;
+    const { pendientes, nuevas } = cerrarPendientes(turno.pendientesAlInicio, turno.nuevasPendientes, turno.resueltos);
+    turno.sesion.pendientesConfirmacion = pendientes;
+    const reply = conPreguntaExplicita(texto, nuevas);
     // El historial del modelo siempre cierra con un mensaje del asistente para conservar la alternancia de roles.
-    sesion.mensajes.push({ rol: "asistente", texto: reply, llamadas: [] } satisfies MensajeLlm);
-    return { reply, toolCalls: turno.llamadas, needsConfirmation };
+    turno.sesion.mensajes.push({ rol: "asistente", texto: reply, llamadas: [] } satisfies MensajeLlm);
+    return { reply, toolCalls: turno.llamadas, needsConfirmation: nuevas.length > 0 };
   }
-}
-
-const preguntaExplicita = (ids: readonly string[]): string =>
-  `¿Confirmas los campos en revisión de ${ids.join(", ")}? Responde «confirmo …» con los valores correctos para registrarlos.`;
-
-const errorDeProveedor = (proveedor: ProveedorLlm, error: string): string =>
-  `No pude obtener respuesta del modelo (${proveedor.nombre}/${proveedor.modelo}): ${error}. La sesión sigue activa: vuelve a intentarlo en un momento.`;
-
-function mensajeDeTope(maxIteraciones: number, llamadas: readonly LlamadaVisible[], ultimoTexto: string): string {
-  const hechas = llamadas.map((llamada) => `- ${llamada.nombre}: ${llamada.ok ? "ok" : "error"} — ${llamada.resumen}`);
-  return [
-    `Alcancé el tope de ${maxIteraciones} iteraciones de este turno sin terminar.`,
-    ultimoTexto,
-    hechas.length > 0 ? `Lo que alcancé a hacer:\n${hechas.join("\n")}` : "No alcancé a ejecutar herramientas.",
-    "Lo que falta: revisar esos resultados y completar los pasos pendientes. Escribe «continúa» para seguir desde aquí.",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
 }

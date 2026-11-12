@@ -7,7 +7,8 @@ import { join } from "node:path";
 import type { Alertas } from "./api/src/application/use-cases/alerts.ts";
 import type { Registro } from "./api/src/application/use-cases/register.ts";
 import type { Contrato } from "./api/src/core/domain/contract.ts";
-import { type ResultadoMensaje, llamarHerramienta, procesarBuzon } from "./api/src/application/workflows/process-mailbox.ts";
+import { type ResultadoMensaje, procesarBuzon } from "./api/src/application/workflows/process-mailbox.ts";
+import { llamarHerramienta } from "./api/src/application/workflows/tool-call.ts";
 import type { ContextoHerramienta } from "./api/src/tools/tool.ts";
 
 const HOY = "2026-09-03";

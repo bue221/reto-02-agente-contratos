@@ -1,86 +1,70 @@
-import type { Alertas } from "../../application/use-cases/alerts.ts";
-import type { Buzon } from "../../application/use-cases/read-mailbox.ts";
-import type { Registro } from "../../application/use-cases/register.ts";
-import type { ValidacionReportada } from "../../application/use-cases/validate.ts";
-import type { Contrato } from "../../core/domain/contract.ts";
+import type { ExplicacionMensaje } from "../../application/use-cases/mailbox-view.ts";
+import type { ConsultaMaestro } from "../../application/use-cases/master-query.ts";
 import { fechaDeHoy } from "../../core/domain/dates.ts";
-import type { Resultado } from "../../core/domain/result.ts";
+import type { RespuestaBuzon } from "../../http/types.ts";
+import type { DecisionReportada, PasadaReportada } from "../../tools/recepcion.ts";
 import type { MensajeLlm } from "../adapter.ts";
-import { type Ejecucion, buscar, ejecuciones, esPendienteDeRevision, indiceUltimoUsuario, mensajeIdDe, textoUltimoUsuario } from "./history.ts";
-import { AYUDA_OFFLINE, detalleDeRevision, preguntaDeConfirmacion, resumenDeAlertas, tablaDeMensajes } from "./replies.ts";
+import { type Ejecucion, buscar, ejecuciones, indiceUltimoUsuario, mensajeIdDe, textoUltimoUsuario } from "./history.ts";
+import {
+  AYUDA_OFFLINE,
+  cierreDePasada,
+  describirDecision,
+  explicacion,
+  resumenDeAlertas,
+  tablaDeEstado,
+  tablaDeMaestro,
+} from "./replies.ts";
 
 /**
- * Guion determinista del proveedor offline: decide el siguiente paso solo a partir del historial.
- * Las llamadas sin dependencias pendientes salen en lote, como haría un modelo con llamadas paralelas.
+ * Guion determinista del proveedor offline: hace de recepcionista con las mismas cinco herramientas
+ * que ve un modelo real y decide el siguiente paso solo a partir del historial.
  */
 
 export type Paso = { tipo: "llamar"; llamadas: { nombre: string; args: Record<string, unknown> }[] } | { tipo: "responder"; texto: string };
 
-const LEER_BUZON = "contratos_leer_buzon";
-const EXTRAER = "contratos_extraer";
-const VALIDAR = "contratos_validar";
-const REGISTRAR = "contratos_registrar";
-const ALERTAS = "contratos_alertas";
-const CLASIFICACIONES_REGISTRABLES = new Set(["nuevo", "actualizacion"]);
+const ESTADO = "recepcion_consultar_estado";
+const MAESTRO = "recepcion_consultar_maestro";
+const EXPLICAR = "recepcion_explicar_validacion";
+const PROCESAR = "recepcion_procesar_buzon";
+const RESPONDER = "recepcion_responder_revision";
 
 const llamar = (...llamadas: { nombre: string; args: Record<string, unknown> }[]): Paso => ({ tipo: "llamar", llamadas });
 const responder = (texto: string): Paso => ({ tipo: "responder", texto });
 
-const fechaDelTexto = (texto: string): string => /\b(\d{4}-\d{2}-\d{2})\b/.exec(texto)?.[1] ?? fechaDeHoy();
+const FECHA = /\b(\d{4}-\d{2}-\d{2})\b/;
+const fechaDelTexto = (texto: string): string | null => FECHA.exec(texto)?.[1] ?? null;
+const idsCitados = (texto: string): string[] => [...texto.matchAll(/msg-\d+/gi)].map((coincidencia) => coincidencia[0].toLowerCase());
 
-/** Siguiente llamada del pipeline extraer → validar → registrar para un mensaje, o null si ya terminó. */
-function siguienteDelMensaje(turno: readonly Ejecucion[], id: string): { nombre: string; args: Record<string, unknown> } | null {
-  const extraido = buscar<Contrato>(turno, EXTRAER, id);
-  if (!extraido) return { nombre: EXTRAER, args: { mensaje_id: id } };
-  if (!extraido.ok) return null;
-  const validacion = buscar<ValidacionReportada>(turno, VALIDAR, id);
-  if (!validacion) return { nombre: VALIDAR, args: { mensaje_id: id, contrato: extraido.data } };
-  if (!validacion.ok || !CLASIFICACIONES_REGISTRABLES.has(validacion.data.clasificacion)) return null;
-  if (buscar<Registro>(turno, REGISTRAR, id)) return null;
-  return { nombre: REGISTRAR, args: { mensaje_id: id, contrato: extraido.data } };
+/** Una vez que la herramienta respondió, el guion redacta; si aún no, la pide. */
+function consultarYResponder<T>(turno: readonly Ejecucion[], nombre: string, args: Record<string, unknown>, redactar: (data: T) => string): Paso {
+  const resultado = buscar<T>(turno, nombre);
+  if (!resultado) return llamar({ nombre, args });
+  return responder(resultado.ok ? redactar(resultado.data) : `No pude completar la consulta: ${resultado.error}`);
 }
 
-const pendientesDelTurno = (turno: readonly Ejecucion[]): string[] =>
-  turno.filter((ejecucion) => ejecucion.nombre === REGISTRAR && esPendienteDeRevision(ejecucion.resultado)).flatMap((ejecucion) => mensajeIdDe(ejecucion) ?? []);
-
-function cierreDelBuzon(turno: readonly Ejecucion[], ids: readonly string[]): string {
-  const pendientes = pendientesDelTurno(turno);
-  const partes = [
-    `Procesé ${ids.length} mensajes del buzón:`,
-    tablaDeMensajes(turno, ids),
-    ...pendientes.map((id) => detalleDeRevision(turno, id)),
-    resumenDeAlertas(buscar<Alertas>(turno, ALERTAS)),
-  ];
-  if (pendientes.length > 0) partes.push(`No registré nada dudoso. ${preguntaDeConfirmacion(pendientes)}`);
-  return partes.filter(Boolean).join("\n\n");
+function procesar(turno: readonly Ejecucion[], hoy: string, mensajeIds: string[] | null): Paso {
+  const args = { hoy, ...(mensajeIds ? { mensaje_ids: mensajeIds } : {}) };
+  return consultarYResponder<PasadaReportada>(turno, PROCESAR, args, (pasada) =>
+    mensajeIds?.length === 0 ? resumenDeAlertas(pasada.alertas) : cierreDePasada(pasada),
+  );
 }
 
-function procesarBuzon(turno: readonly Ejecucion[], hoy: string): Paso {
-  const buzon = buscar<Buzon>(turno, LEER_BUZON);
-  if (!buzon) return llamar({ nombre: LEER_BUZON, args: {} });
-  if (!buzon.ok) return responder(`No pude leer el buzón: ${buzon.error}`);
-  const ids = buzon.data.mensajes.map((mensaje) => mensaje.id);
-  const siguientes = ids.flatMap((id) => siguienteDelMensaje(turno, id) ?? []);
-  if (siguientes.length > 0) return llamar(...siguientes);
-  if (!buscar<Alertas>(turno, ALERTAS)) return llamar({ nombre: ALERTAS, args: { hoy } });
-  if (ids.length === 0) return responder(`El buzón no tiene mensajes pendientes.\n\n${resumenDeAlertas(buscar<Alertas>(turno, ALERTAS))}`);
-  return responder(cierreDelBuzon(turno, ids));
-}
-
-/** Contratos que quedaron en "requiere revisión" y aún no se registraron, con el contrato que se propuso. */
-function pendientesDeConfirmar(previas: readonly Ejecucion[]): Map<string, Record<string, unknown>> {
-  const pendientes = new Map<string, Record<string, unknown>>();
+/** Mensajes que el motor pausó en turnos anteriores y que ninguna decisión ha cerrado todavía. */
+function pausados(previas: readonly Ejecucion[]): string[] {
+  const enEspera = new Set<string>();
   for (const ejecucion of previas) {
+    if (!ejecucion.resultado.ok) continue;
+    if (ejecucion.nombre === PROCESAR) for (const id of (ejecucion.resultado.data as PasadaReportada).en_revision) enEspera.add(id);
     const id = mensajeIdDe(ejecucion);
-    if (ejecucion.nombre !== REGISTRAR || !id) continue;
-    if (esPendienteDeRevision(ejecucion.resultado) && typeof ejecucion.args.contrato === "object" && ejecucion.args.contrato !== null) {
-      pendientes.set(id, ejecucion.args.contrato as Record<string, unknown>);
-    } else if (ejecucion.resultado.ok) {
-      pendientes.delete(id);
-    }
+    if (ejecucion.nombre === RESPONDER && id) enEspera.delete(id);
   }
-  return pendientes;
+  return [...enEspera];
 }
+
+const ultimaFecha = (previas: readonly Ejecucion[]): string | null => {
+  const hoy = previas.findLast((ejecucion) => ejecucion.nombre === PROCESAR)?.args.hoy;
+  return typeof hoy === "string" ? hoy : null;
+};
 
 const CORRECCIONES: readonly { campo: string; patron: RegExp; convertir: (texto: string) => unknown }[] = [
   { campo: "valor", patron: /valor\s+(?:de\s+)?\$?\s*([\d.,]+)/i, convertir: (texto) => Number(texto.replace(/[.,]/g, "")) },
@@ -88,44 +72,52 @@ const CORRECCIONES: readonly { campo: string; patron: RegExp; convertir: (texto:
   { campo: "fecha_inicio", patron: /fecha\s+(?:de\s+)?inicio\s+(\d{4}-\d{2}-\d{2})/i, convertir: (texto) => texto },
 ];
 
-/** Aplica al contrato propuesto solo los valores que el usuario dictó explícitamente. */
-function conCorrecciones(contrato: Record<string, unknown>, texto: string): Record<string, unknown> {
-  const corregido = { ...contrato };
+/** Solo los valores que la analista dictó explícitamente: el resto queda como lo extrajo el motor. */
+function correccionesDelTexto(texto: string): Record<string, unknown> {
+  const correcciones: Record<string, unknown> = {};
   for (const { campo, patron, convertir } of CORRECCIONES) {
     const encontrado = patron.exec(texto)?.[1];
-    const actual = corregido[campo];
-    if (encontrado && typeof actual === "object" && actual !== null) corregido[campo] = { ...actual, valor: convertir(encontrado) };
+    if (encontrado) correcciones[campo] = convertir(encontrado);
   }
-  return corregido;
+  return correcciones;
 }
 
-function describirRegistro(id: string, resultado: Resultado<Registro> | undefined): string {
-  if (!resultado) return `- ${id}: sin respuesta`;
-  return resultado.ok ? `- ${id}: ${resultado.data.accion} ${resultado.data.id_contrato ?? ""} → ${resultado.data.ruta_archivo ?? "sin archivo"}` : `- ${id}: ${resultado.error}`;
-}
+const motivoDelTexto = (texto: string): string => /(?:porque|motivo:?)\s+(.+)/i.exec(texto)?.[1]?.trim() ?? texto.trim();
 
-function confirmar(mensajes: readonly MensajeLlm[], turno: readonly Ejecucion[], texto: string): Paso {
-  const pendientes = pendientesDeConfirmar(ejecuciones(mensajes.slice(0, indiceUltimoUsuario(mensajes))));
-  const citados = [...texto.matchAll(/msg-\d+/gi)].map((coincidencia) => coincidencia[0].toLowerCase());
-  const objetivo = [...pendientes.keys()].filter((id) => citados.length === 0 || citados.includes(id));
-  if (objetivo.length === 0) return responder("No hay registros pendientes de confirmación en esta sesión.");
-  const faltan = objetivo.filter((id) => !buscar<Registro>(turno, REGISTRAR, id));
+function decidir(mensajes: readonly MensajeLlm[], turno: readonly Ejecucion[], texto: string, decision: "aprobar" | "rechazar"): Paso {
+  const previas = ejecuciones(mensajes.slice(0, indiceUltimoUsuario(mensajes)));
+  const citados = idsCitados(texto);
+  const objetivo = pausados(previas).filter((id) => citados.length === 0 || citados.includes(id));
+  if (objetivo.length === 0) return responder("No hay mensajes esperando tu decisión en esta sesión.");
+  const faltan = objetivo.filter((id) => !buscar(turno, RESPONDER, id));
   if (faltan.length > 0) {
-    return llamar(...faltan.map((id) => ({ nombre: REGISTRAR, args: { mensaje_id: id, contrato: conCorrecciones(pendientes.get(id) ?? {}, texto), confirmado: true } })));
+    const hoy = ultimaFecha(previas);
+    const detalle = decision === "aprobar" ? { correcciones: correccionesDelTexto(texto) } : { motivo: motivoDelTexto(texto) };
+    return llamar(...faltan.map((id) => ({ nombre: RESPONDER, args: { mensaje_id: id, decision, ...detalle, ...(hoy ? { hoy } : {}) } })));
   }
-  return responder(["Con tu confirmación registré:", ...objetivo.map((id) => describirRegistro(id, buscar<Registro>(turno, REGISTRAR, id)))].join("\n"));
+  const resultados = objetivo.map((id) => [id, buscar<DecisionReportada>(turno, RESPONDER, id)] as const);
+  const lineas = resultados.map(([id, resultado]) => (resultado?.ok ? describirDecision(resultado.data) : `- ${id}: ${resultado?.error ?? "sin respuesta"}`));
+  const alertas = resultados.map(([, resultado]) => (resultado?.ok ? resultado.data.alertas : null)).findLast((actual) => actual !== null) ?? null;
+  return responder([`Con tu decisión el motor reanudó:`, lineas.join("\n"), resumenDeAlertas(alertas)].filter(Boolean).join("\n\n"));
 }
 
-function generarAlertas(turno: readonly Ejecucion[], hoy: string): Paso {
-  const alertas = buscar<Alertas>(turno, ALERTAS);
-  return alertas ? responder(resumenDeAlertas(alertas)) : llamar({ nombre: ALERTAS, args: { hoy } });
-}
+const pideRechazo = (texto: string): boolean => /\brechaz/i.test(texto);
+const pideConfirmar = (texto: string): boolean => /\bconfirm/i.test(texto) && !/\bno\b/i.test(texto);
+const CONTRATO = /\b[A-Z]{2,}-\d{4}-\d+\b/i;
 
 export function siguientePaso(mensajes: readonly MensajeLlm[]): Paso {
   const texto = textoUltimoUsuario(mensajes);
   const turno = ejecuciones(mensajes.slice(indiceUltimoUsuario(mensajes)));
-  if (/\bconfirm/i.test(texto) && !/\bno\b/i.test(texto)) return confirmar(mensajes, turno, texto);
-  if (/buz[oó]n/i.test(texto)) return procesarBuzon(turno, fechaDelTexto(texto));
-  if (/alerta/i.test(texto)) return generarAlertas(turno, fechaDelTexto(texto));
+  const citados = idsCitados(texto);
+  if (pideRechazo(texto)) return decidir(mensajes, turno, texto, "rechazar");
+  if (pideConfirmar(texto)) return decidir(mensajes, turno, texto, "aprobar");
+  if (/\bproces/i.test(texto) && citados.length > 0) return procesar(turno, fechaDelTexto(texto) ?? fechaDeHoy(), citados);
+  if (/\bestado\b/i.test(texto)) return consultarYResponder<RespuestaBuzon>(turno, ESTADO, {}, tablaDeEstado);
+  if (/buz[oó]n/i.test(texto)) return procesar(turno, fechaDelTexto(texto) ?? fechaDeHoy(), null);
+  if (/alerta/i.test(texto)) return procesar(turno, fechaDelTexto(texto) ?? fechaDeHoy(), []);
+  const [citado] = citados;
+  if (citado) return consultarYResponder<ExplicacionMensaje>(turno, EXPLICAR, { mensaje_id: citado }, explicacion);
+  const contrato = CONTRATO.exec(texto)?.[0];
+  if (contrato || /maestro/i.test(texto)) return consultarYResponder<ConsultaMaestro>(turno, MAESTRO, contrato ? { consulta: contrato } : {}, tablaDeMaestro);
   return responder(AYUDA_OFFLINE);
 }

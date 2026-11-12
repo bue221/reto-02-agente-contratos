@@ -2,6 +2,7 @@ import { marcarProcesado, registrarLog } from "../../infrastructure/logs.ts";
 import { type DecisionHumana, registrarDecision } from "../../infrastructure/decision-store.ts";
 import { rutasDelProyecto } from "../../infrastructure/paths.ts";
 import type { RespuestaDecision, RespuestaProcesar } from "../../http/types.ts";
+import type { Alertas } from "../use-cases/alerts.ts";
 import {
   type ResultadoHitl,
   describirProcesado,
@@ -14,22 +15,32 @@ import { cargarMensaje, extraerDeMensaje } from "../use-cases/message.ts";
 import type { Registro } from "../use-cases/register.ts";
 import { resumenMensaje } from "../use-cases/mailbox-view.ts";
 import type { Contrato, Correcciones } from "../../core/domain/contract.ts";
+import type { Resultado } from "../../core/domain/result.ts";
 import type { ContextoHerramienta } from "../../tools/tool.ts";
-import { llamarHerramienta, procesarMensaje } from "./process-mailbox.ts";
+import { ejecutarGrafoMensaje } from "./contract-graph.ts";
+import { llamarHerramienta } from "./tool-call.ts";
 
 /**
- * Acciones humanas del buzón y la bandeja. Todo pasa por las mismas herramientas que usa el agente
- * (validadas con zod y trazadas en `out/log.jsonl`); aquí solo se decide qué está permitido.
+ * Reanudación del grafo tras la pausa humana (`esperar_revision`), igual desde la bandeja que desde el chat:
+ *
+ *   esperar_revision ─┬─ aprobar  ─▶ aplicar correcciones ─▶ contratos_registrar (confirmado) ─▶ [alertas]
+ *                     └─ rechazar ─▶ cerrar como rechazado                                    ─▶ [alertas]
+ *
+ * Todo pasa por las mismas herramientas (zod + `out/log.jsonl`); aquí solo se decide qué está permitido.
  */
+
+export type Canal = DecisionHumana["via"];
 
 export interface Aprobacion {
   aprobador: string;
   correcciones: Correcciones;
+  via: Canal;
 }
 
 export interface Rechazo {
   aprobador: string;
   motivo: string;
+  via: Canal;
 }
 
 async function comprobarAbierto(ctx: ContextoHerramienta, id: string): Promise<ResultadoHitl<null>> {
@@ -39,11 +50,11 @@ async function comprobarAbierto(ctx: ContextoHerramienta, id: string): Promise<R
   return procesado ? falloHitl("ya_procesado", procesado) : { ok: true, data: null };
 }
 
-/** extraer → validar → registrar sin confirmación, igual que la pasada scripted: lo dudoso queda en la bandeja. */
+/** El grafo completo para un solo mensaje: lo dudoso queda pausado en la bandeja. */
 export async function procesarDesdeBuzon(ctx: ContextoHerramienta, id: string): Promise<ResultadoHitl<RespuestaProcesar>> {
   const abierto = await comprobarAbierto(ctx, id);
   if (!abierto.ok) return abierto;
-  const resultado = await procesarMensaje(id, ctx);
+  const resultado = await ejecutarGrafoMensaje(id, ctx);
   const mensaje = await resumenMensaje(rutasDelProyecto(ctx.directory), id);
   return { ok: true, data: { mensaje, accion: resultado.accion, requiere_revision: resultado.requiere_revision, avisos: resultado.avisos } };
 }
@@ -72,9 +83,10 @@ async function extraerParaAprobar(ctx: ContextoHerramienta, id: string): Promise
 
 async function anotar(ctx: ContextoHerramienta, decision: Omit<DecisionHumana, "ts">): Promise<RespuestaDecision> {
   const rutas = rutasDelProyecto(ctx.directory);
-  const { mensaje_id: id, aprobador } = decision;
-  const resumen = decision.decision === "aprobado" ? `aprobado por ${aprobador}: ${decision.accion} ${decision.id_contrato ?? ""}`.trim() : `rechazado por ${aprobador}: ${decision.motivo}`;
-  await registrarLog(rutas, { herramienta: `bandeja_${decision.decision === "aprobado" ? "aprobar" : "rechazar"}`, mensaje_id: id, ok: true, resumen });
+  const { mensaje_id: id, aprobador, via } = decision;
+  const aprobado = decision.decision === "aprobado";
+  const resumen = aprobado ? `aprobado por ${aprobador}: ${decision.accion} ${decision.id_contrato ?? ""}`.trim() : `rechazado por ${aprobador}: ${decision.motivo}`;
+  await registrarLog(rutas, { herramienta: `${via}_${aprobado ? "aprobar" : "rechazar"}`, mensaje_id: id, ok: true, resumen });
   const anotada = await registrarDecision(rutas, decision);
   return { mensaje: await resumenMensaje(rutas, id), decision: anotada };
 }
@@ -89,7 +101,7 @@ export async function aprobar(ctx: ContextoHerramienta, id: string, aprobacion: 
   const registro = await llamarHerramienta<Registro>("contratos_registrar", { mensaje_id: id, contrato, confirmado: true }, ctx);
   if (!registro.ok) return falloHitl("registro_fallido", registro.error);
   const { id_contrato, accion, cambios } = registro.data;
-  const decision = { mensaje_id: id, decision: "aprobado", via: "bandeja", motivo: null, ...aprobacion, id_contrato, accion, cambios } as const;
+  const decision = { mensaje_id: id, decision: "aprobado", motivo: null, ...aprobacion, id_contrato, accion, cambios } as const;
   return { ok: true, data: await anotar(ctx, decision) };
 }
 
@@ -98,6 +110,27 @@ export async function rechazar(ctx: ContextoHerramienta, id: string, rechazo: Re
   const espera = await enEspera(ctx, id);
   if (!espera.ok) return espera;
   await marcarProcesado(rutasDelProyecto(ctx.directory), id, "rechazado", null);
-  const decision = { mensaje_id: id, decision: "rechazado", via: "bandeja", correcciones: {}, ...rechazo, id_contrato: null, accion: null, cambios: {} } as const;
+  const decision = { mensaje_id: id, decision: "rechazado", correcciones: {}, ...rechazo, id_contrato: null, accion: null, cambios: {} } as const;
   return { ok: true, data: await anotar(ctx, decision) };
+}
+
+export type Reanudacion =
+  | ({ mensajeId: string; decision: "aprobar"; hoy: string | null } & Aprobacion)
+  | ({ mensajeId: string; decision: "rechazar"; hoy: string | null } & Rechazo);
+
+export interface Reanudado extends RespuestaDecision {
+  /** Reporte regenerado tras la decisión, si se pidió con `hoy`. */
+  alertas: Resultado<Alertas> | null;
+}
+
+/** Decisión humana sobre un mensaje pausado y, si se pide, refresco de alertas: así nunca se citan de memoria. */
+export async function reanudarRevision(ctx: ContextoHerramienta, reanudacion: Reanudacion): Promise<ResultadoHitl<Reanudado>> {
+  const { mensajeId, hoy } = reanudacion;
+  const decidido =
+    reanudacion.decision === "aprobar"
+      ? await aprobar(ctx, mensajeId, { aprobador: reanudacion.aprobador, correcciones: reanudacion.correcciones, via: reanudacion.via })
+      : await rechazar(ctx, mensajeId, { aprobador: reanudacion.aprobador, motivo: reanudacion.motivo, via: reanudacion.via });
+  if (!decidido.ok) return decidido;
+  const alertas = hoy ? await llamarHerramienta<Alertas>("contratos_alertas", { hoy }, ctx) : null;
+  return { ok: true, data: { ...decidido.data, alertas } };
 }

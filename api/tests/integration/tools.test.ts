@@ -8,7 +8,8 @@ import type { Registro } from "../../src/application/use-cases/register.ts";
 import type { ValidacionReportada } from "../../src/application/use-cases/validate.ts";
 import type { Contrato } from "../../src/core/domain/contract.ts";
 import type { FilaMaestro } from "../../src/core/domain/master.ts";
-import { type ResultadoMensaje, llamarHerramienta, procesarBuzon } from "../../src/application/workflows/process-mailbox.ts";
+import { type ResultadoMensaje, procesarBuzon } from "../../src/application/workflows/process-mailbox.ts";
+import { llamarHerramienta } from "../../src/application/workflows/tool-call.ts";
 import { ejecutarHerramienta, extraer, herramientas } from "../../src/tools/contratos.ts";
 import type { ContextoHerramienta } from "../../src/tools/tool.ts";
 import { HOY, agregarMensaje, contratoModificado, crearProyecto, extraerOk, leerFixture, leerSalida, lineasJson } from "../helpers.ts";
@@ -105,7 +106,8 @@ describe("primera pasada por el buzón (PRD 7.4)", () => {
   test("msg-006 queda sin registrar, con revisión de valor y fecha_fin y aviso de remitente desconocido", async () => {
     const marco = resultados.get("msg-006");
     expect(marco?.requiere_revision).toEqual(expect.arrayContaining(["valor", "fecha_fin"]));
-    expect(marco?.accion).toContain("requiere revisión");
+    expect(marco?.desenlace).toBe("en_revision");
+    expect(marco?.accion).toContain("en espera de confirmación humana");
     expect(marco?.avisos.join(" ")).toContain("jperez@periferia-ficticia.com");
     expect(fila(await leerMaestroSalida(ctx), "CM-2026-03")).toBeUndefined();
   });
