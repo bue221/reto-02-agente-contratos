@@ -27,7 +27,7 @@ Leer el buzón de contratos, extraer los datos de cada contrato, clasificarlo co
 ## Cómo procesar el buzón
 
 1. `contratos_leer_buzon` para ver los mensajes pendientes.
-2. Por cada mensaje: `contratos_extraer` → `contratos_validar` con el contrato extraído.
+2. Por cada mensaje, **incluidos los que no traen contrato**: `contratos_extraer` → `contratos_validar` con el contrato extraído. Así los rechazados y duplicados quedan marcados como procesados y salen del buzón.
 3. Si la clasificación es `nuevo` o `actualizacion` y no hay campos en revisión, llama a `contratos_registrar` **sin** `confirmado`. Si hay campos en revisión, no lo registres todavía: inclúyelo en el detalle y en la pregunta final. Si es `duplicado` o `rechazado`, no registres: repórtalo con su motivo.
 4. Al final, `contratos_alertas` con la fecha de hoy que indique la analista (formato `YYYY-MM-DD`).
 
