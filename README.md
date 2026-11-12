@@ -86,11 +86,14 @@ Todas opcionales; ver [`.env.example`](.env.example). La clave solo vive en el b
 | `PORT` | `3000` | Puerto del backend. |
 | `CORS_ORIGINS` | vacío | Orígenes del front desplegado aparte, separados por coma. Vacío: solo mismo origen. |
 | `VITE_API_URL` | vacío | Solo en el build del front: URL pública del backend. Vacío: mismo origen. |
-| `LANGGRAPH_URL` | vacío (en la imagen, `http://127.0.0.1:2024`) | Servidor de LangGraph de `studio/` que la API publica en `/langgraph` y que habilita el botón **Abrir en LangGraph Studio**. Vacío: no se publica. |
+| `LANGGRAPH_URL` | vacío (en la imagen, `http://127.0.0.1:2024`) | Servidor de LangGraph de `studio/` que la API publica en `/langgraph` y que habilita el botón **Probar con LangGraph**. Vacío: no se publica. |
 
 ## Ver los grafos en LangGraph Studio
 
-**Desde la web**: el botón **Abrir en LangGraph Studio** de la barra lateral abre una guía con el enlace a Studio (smith.langchain.com, pide iniciar sesión en LangSmith; la cuenta gratuita basta) y los dos valores para conectarlo al backend desplegado, con botón de copiar.
+**Desde la web**: el botón **Probar con LangGraph** de la barra lateral abre una guía con dos clientes del mismo servidor:
+
+- **Agent Chat UI** (agentchat.vercel.app, de LangChain): entra directo, sin cuenta ni configuración, al chat del grafo `recepcionista` con cada llamada a herramienta visible. No dibuja el grafo.
+- **LangGraph Studio** (smith.langchain.com): el grafo visual y la pausa del `motor`. Pide iniciar sesión en LangSmith (la cuenta gratuita basta) y permitir el dominio una vez; la guía trae el dominio y el Base URL con botón de copiar.
 
 Studio solo confía en `localhost`: la primera vez muestra *«Failed to connect to Agent Server because the domain … is not allowed»*. Se resuelve una vez por navegador: en esa misma pantalla, **Advanced Settings** → agrega el dominio `reto02-contratos.wn60e6ytewk9j.us-east-1.cs.amazonlightsail.com` a la lista de permitidos y reconecta con el Base URL `https://reto02-contratos.wn60e6ytewk9j.us-east-1.cs.amazonlightsail.com/langgraph`. Si sigue fallando, en la portada de Studio usa **Connect to local server**, pega el Base URL y permite el dominio en Advanced Settings del mismo diálogo. Es una restricción del lado de LangSmith: no se puede levantar desde el servidor.
  La imagen levanta el servidor de LangGraph junto a la API y esta lo publica en `/langgraph`, así que Studio trabaja sobre el mismo `out/` que la app: lo que registren ahí aparece en el Buzón, la Bandeja y el Maestro.
@@ -107,7 +110,7 @@ Abre <https://smith.langchain.com/studio?baseUrl=http://localhost:2024> (o pon `
 
 ```bash
 bun install && bun run demo.ts   # procesa los 6 mensajes llamando directo a las herramientas
-bun run test                     # 168 pruebas: api/tests (extracción, reglas, herramientas, motor, ciclo, guardas, HTTP, bandeja, reinicio, módulo) y studio/tests
+bun run test                     # 170 pruebas: api/tests (extracción, reglas, herramientas, motor, ciclo, guardas, HTTP, bandeja, reinicio, módulo) y studio/tests
 bun run typecheck                # api + web + studio
 ```
 

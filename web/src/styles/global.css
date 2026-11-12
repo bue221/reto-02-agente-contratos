@@ -1379,6 +1379,25 @@ td.changed {
   margin: 0;
 }
 
+.studio-opcion {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.studio-opcion h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.studio-opcion .studio-pasos {
+  justify-self: stretch;
+}
+
 .studio-pasos {
   display: grid;
   gap: 14px;

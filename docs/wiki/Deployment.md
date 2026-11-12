@@ -82,7 +82,7 @@ flowchart TD
   H -->|sin LANGGRAPH_URL| HN["studio: false · solo la app"]
 ```
 
-`docker-entrypoint.sh` hace `exec bun run start` (API + front). Si `LANGGRAPH_URL` tiene valor (la imagen trae `http://127.0.0.1:2024`), antes levanta en segundo plano `langgraphjs dev` de `studio/` bajo Node, escuchando solo en `127.0.0.1` y en el puerto de esa URL, sin recarga ni telemetría. La API lo publica en `/langgraph/*` (`api/src/http/langgraph-proxy.ts`), porque el contenedor expone un solo puerto, y `/api/health` responde `studio: true`, que es lo que muestra el botón **Abrir en LangGraph Studio** del front. Si el servidor de LangGraph se cae, la app sigue y `/langgraph` responde `502 langgraph_no_disponible`. Con `-e LANGGRAPH_URL=` solo arranca la API.
+`docker-entrypoint.sh` hace `exec bun run start` (API + front). Si `LANGGRAPH_URL` tiene valor (la imagen trae `http://127.0.0.1:2024`), antes levanta en segundo plano `langgraphjs dev` de `studio/` bajo Node, escuchando solo en `127.0.0.1` y en el puerto de esa URL, sin recarga ni telemetría. La API lo publica en `/langgraph/*` (`api/src/http/langgraph-proxy.ts`), porque el contenedor expone un solo puerto, y `/api/health` responde `studio: true`, que es lo que muestra el botón **Probar con LangGraph** del front. Si el servidor de LangGraph se cae, la app sigue y `/langgraph` responde `502 langgraph_no_disponible`. Con `-e LANGGRAPH_URL=` solo arranca la API.
 
 El contexto lo filtra `.dockerignore` (sin `node_modules`, `.env`, `.git`, `docs`, `out`, `api/tests`, `studio/tests`, `studio/.langgraph_api`).
 
@@ -100,7 +100,7 @@ docker compose up --build        # lee .env si existe
 | Front (`web/`) | Vercel, proyecto `reto02-contratos` | `web/vercel.json`; variable de build `VITE_API_URL` = URL del backend. |
 | Backend (imagen) | AWS Lightsail Containers `reto02-contratos` (nano, 1 nodo, `us-east-1`) | Puerto 3000, health check `/api/health`; `LLM_PROVIDER=gemini`, `GOOGLE_API_KEY`, `GEMINI_MODEL`, `CORS_ORIGINS=https://reto02-contratos.vercel.app`. |
 
-Studio queda en `https://<servicio>.cs.amazonlightsail.com/langgraph`; el botón del front abre `https://smith.langchain.com/studio/?baseUrl=<backend>/langgraph`. Studio llama a ese `baseUrl` desde el navegador; el servidor de LangGraph acepta cualquier origen, así que `CORS_ORIGINS` no hace falta para Studio. Memoria medida: unos 250–310 MB con los dos procesos, dentro de los 512 MB del plan nano; si se queda corto, usa `micro`.
+Studio queda en `https://<servicio>.cs.amazonlightsail.com/langgraph`; el botón del front abre `https://smith.langchain.com/studio/?baseUrl=<backend>/langgraph`. Studio llama a ese `baseUrl` desde el navegador; el servidor de LangGraph acepta cualquier origen, así que `CORS_ORIGINS` no hace falta para Studio. Memoria medida: unos 190–310 MB con los dos procesos, dentro de los 512 MB del plan nano. Requisito para que quepa: el estado de los grafos de `studio/` en zod, para que el servidor no compile TypeScript al pedirle esquemas ([Studio](Studio.md)).
 
 Por qué Lightsail y no Lambda: un proceso siempre encendido conserva sesiones y `out/` entre «procesa el buzón» y «confirmo…» (`SOLUCION.md` §7).
 

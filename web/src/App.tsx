@@ -85,7 +85,7 @@ function BarraLateral({ tab, onTab, contadores, salud, aprobador, onAprobador, r
         </span>
         {salud?.studio ? (
           <button type="button" className="ghost" onClick={onStudio}>
-            Abrir en LangGraph Studio
+            Probar con LangGraph
           </button>
         ) : null}
         <label className="approver-field">

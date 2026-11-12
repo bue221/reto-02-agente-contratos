@@ -16,13 +16,13 @@ bun install
 bun run studio          # langgraphjs dev en http://localhost:2024
 ```
 
-Abre <https://smith.langchain.com/studio?baseUrl=http://localhost:2024> (pide iniciar sesión en LangSmith; la cuenta gratuita basta). Con `LANGGRAPH_URL=http://127.0.0.1:2024` en `.env`, `bun run dev` también muestra el botón **Abrir en LangGraph Studio** (Vite reenvía `/langgraph` a la API). El servidor corre bajo Node con recarga en caliente y carga `../.env`: con `GOOGLE_API_KEY` la recepcionista usa Gemini; sin clave, el proveedor offline.
+Abre <https://smith.langchain.com/studio?baseUrl=http://localhost:2024> (pide iniciar sesión en LangSmith; la cuenta gratuita basta). Con `LANGGRAPH_URL=http://127.0.0.1:2024` en `.env`, `bun run dev` también muestra el botón **Probar con LangGraph** (Vite reenvía `/langgraph` a la API). El servidor corre bajo Node con recarga en caliente y carga `../.env`: con `GOOGLE_API_KEY` la recepcionista usa Gemini; sin clave, el proveedor offline.
 
 Los grafos usan la **misma raíz del proyecto** que la app: lo que se registre en Studio aparece en el Buzón, la Bandeja y el Maestro de `bun run dev`. Para empezar de cero, ejecuta el grafo `reiniciar_demo`, **Reiniciar demo** en el front o `POST /api/demo/reset`, y abre un hilo nuevo (los hilos de Studio guardan sus `pendientes` aparte, en `studio/.langgraph_api/`).
 
 ## Desde la web
 
-La imagen Docker levanta este mismo servidor (`langgraphjs dev`, bajo Node 22, solo en `127.0.0.1:2024`) junto a la API, y la API lo publica en `/langgraph/*` con un reenvío transparente (`api/src/http/langgraph-proxy.ts`). Cuando `LANGGRAPH_URL` está definido, `/api/health` devuelve `studio: true` y la barra lateral del front muestra **Abrir en LangGraph Studio**, que abre una guía (`web/src/components/StudioDialog.tsx`) con el enlace `https://smith.langchain.com/studio/?baseUrl=<backend>/langgraph`, el dominio y el Base URL para copiar, y qué probar en cada grafo. Studio llama a ese `baseUrl` desde el navegador del evaluador. Como corre en el mismo contenedor, comparte `out/` con la app: lo que se registre en Studio aparece en el Buzón, la Bandeja y el Maestro de la web, y al revés. Detalles de la imagen en [Despliegue](Deployment.md).
+La imagen Docker levanta este mismo servidor (`langgraphjs dev`, bajo Node 22, solo en `127.0.0.1:2024`) junto a la API, y la API lo publica en `/langgraph/*` con un reenvío transparente (`api/src/http/langgraph-proxy.ts`). Cuando `LANGGRAPH_URL` está definido, `/api/health` devuelve `studio: true` y la barra lateral del front muestra **Probar con LangGraph**, que abre una guía (`web/src/components/StudioDialog.tsx`) con dos clientes del mismo servidor: **Agent Chat UI** (`https://agentchat.vercel.app/?apiUrl=<backend>/langgraph&assistantId=recepcionista`), que entra sin cuenta ni configuración al chat de la recepcionista con las llamadas a herramientas visibles, y **LangGraph Studio** (`https://smith.langchain.com/studio/?baseUrl=<backend>/langgraph`), con el grafo visual, el dominio y el Base URL para copiar, y qué probar en cada grafo. Studio llama a ese `baseUrl` desde el navegador del evaluador. Como corre en el mismo contenedor, comparte `out/` con la app: lo que se registre en Studio aparece en el Buzón, la Bandeja y el Maestro de la web, y al revés. Detalles de la imagen en [Despliegue](Deployment.md).
 
 **Dominio permitido.** Studio solo confía en `localhost`. Con cualquier otro servidor, la primera vez responde *«Failed to connect to Agent Server because the domain "…" is not allowed»*. Cada persona lo resuelve una vez en su navegador: en esa pantalla, **Advanced Settings** → agregar el dominio del backend a la lista de permitidos → reconectar con el Base URL `<backend>/langgraph`. Si el enlace con `?baseUrl=` no conecta, en la portada de Studio usa **Connect to local server**, pega el Base URL y permite el dominio en Advanced Settings del mismo diálogo. La lista vive en LangSmith, no en el servidor: ni CORS ni `langgraph.json` la evitan.
 
@@ -36,7 +36,7 @@ sequenceDiagram
 
   W->>API: GET /api/health
   API-->>W: { studio: true }
-  U->>W: clic en «Abrir en LangGraph Studio»
+  U->>W: clic en «Probar con LangGraph»
   W->>ST: abre ?baseUrl=<backend>/langgraph
   ST->>API: GET /langgraph/assistants, threads, runs (desde el navegador)
   API->>LG: reenvío sin el prefijo /langgraph
@@ -46,6 +46,8 @@ sequenceDiagram
     API-->>ST: 502 langgraph_no_disponible
   end
 ```
+
+**Estado en zod, no `Annotation`.** Los tres grafos declaran su estado con zod v3: la recepcionista con `MessagesZodState`, y el motor y `reiniciar_demo` con `z.object` (los canales con valor inicial usan `withLangGraph` con `default` y un reducer de último valor, el equivalente de `Annotation<T>({ reducer, default })`). Así el servidor saca los esquemas que pide Studio (`/assistants/{id}/schemas` y `/subgraphs`) directamente del grafo. Con `Annotation` los infiere compilando el proyecto con TypeScript en un hilo aparte por petición; Studio pide los tres grafos a la vez al conectar y eso superó los 512 MB del contenedor de Lightsail, que mató el proceso de LangGraph. Una prueba de `studio/tests/graphs.test.ts` exige que todo grafo y subgrafo resuelva su esquema así.
 
 ## `reiniciar_demo`
 
@@ -144,4 +146,4 @@ Estado: `hoy`, `mensaje_ids`, `cola`, `actual` (el mensaje en curso y su `recorr
 
 ## Pruebas
 
-`studio/tests/graphs.test.ts` (9 pruebas, en `bun run test`): el motor pausa en msg-006 y reanuda con la decisión, una respuesta inválida vuelve a pausar, `reiniciar_demo` deja `out/` como recién desplegado, la recepcionista repite el flujo del PRD §11 con el proveedor offline, `recepcion_procesar_buzon` recorre el motor como subgrafo visible con el mismo resultado, la guarda CA3 y la de entrada rigen también aquí, y los topes de tokens cortan por hilo y por proceso sin llamar al modelo ni al clasificador.
+`studio/tests/graphs.test.ts` (11 pruebas, en `bun run test`): el motor pausa en msg-006 y reanuda con la decisión, una respuesta inválida vuelve a pausar, `reiniciar_demo` deja `out/` como recién desplegado, la recepcionista repite el flujo del PRD §11 con el proveedor offline, `recepcion_procesar_buzon` recorre el motor como subgrafo visible con el mismo resultado, la guarda CA3 y la de entrada rigen también aquí, los topes de tokens cortan por hilo y por proceso sin llamar al modelo ni al clasificador, y todos los grafos y subgrafos publican su esquema en tiempo de ejecución.

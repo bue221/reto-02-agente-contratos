@@ -33,7 +33,7 @@ flowchart LR
   App -.->|"si studio: true · abre en pestaña nueva"| LS["smith.langchain.com/studio?baseUrl=backend/langgraph"]
 ```
 
-`App.tsx` arma la barra lateral (pestañas, contadores, proveedor activo, **Abrir en LangGraph Studio** si `/api/health` trae `studio: true`, que abre la guía `components/StudioDialog.tsx`, **Aprobador**, **Reiniciar demo**) y vuelve a pedir buzón, bandeja y maestro (`refrescar`) tras cada acción o turno del chat.
+`App.tsx` arma la barra lateral (pestañas, contadores, proveedor activo, **Probar con LangGraph** si `/api/health` trae `studio: true`, que abre la guía `components/StudioDialog.tsx` con Agent Chat UI y LangGraph Studio, **Aprobador**, **Reiniciar demo**) y vuelve a pedir buzón, bandeja y maestro (`refrescar`) tras cada acción o turno del chat.
 
 ## Componentes
 

@@ -30,6 +30,8 @@ export const BASE_URL_STUDIO = `${BASE_API || window.location.origin}/langgraph`
 /** Studio solo confía en localhost: cada persona debe permitir este dominio una vez en sus Advanced Settings. */
 export const DOMINIO_STUDIO = new URL(BASE_URL_STUDIO).host;
 export const URL_STUDIO = `https://smith.langchain.com/studio/?baseUrl=${encodeURIComponent(BASE_URL_STUDIO)}`;
+/** Agent Chat UI (LangChain) conecta con el mismo servidor sin cuenta ni lista de dominios: el chat del grafo recepcionista. */
+export const URL_AGENT_CHAT = `https://agentchat.vercel.app/?apiUrl=${encodeURIComponent(BASE_URL_STUDIO)}&assistantId=recepcionista`;
 
 /** Error legible para la UI con el código tipado del backend (p. ej. `no_pendiente`). */
 export class ErrorDeApi extends Error {
