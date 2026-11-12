@@ -17,6 +17,7 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
+    "@langchain/langgraph-api": "1.7.1",
     "@types/bun": "^1.2.0",
     "typescript": "^5.9.0"
   }

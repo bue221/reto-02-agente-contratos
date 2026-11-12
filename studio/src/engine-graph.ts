@@ -1,5 +1,7 @@
-import { Annotation, type BaseCheckpointSaver, END, type LangGraphRunnableConfig, START, StateGraph, interrupt } from "@langchain/langgraph";
+import { type BaseCheckpointSaver, END, type LangGraphRunnableConfig, START, StateGraph, interrupt } from "@langchain/langgraph";
 import { z } from "zod";
+import { withLangGraph } from "@langchain/langgraph/zod";
+import { z as z3 } from "zod/v3";
 import type { Alertas } from "../../api/src/application/use-cases/alerts.ts";
 import { reanudarRevision } from "../../api/src/application/workflows/approval-tray.ts";
 import {
@@ -32,34 +34,48 @@ import { type DependenciasStudio, dependenciasPorEntorno } from "./project.ts";
  *                                               └─▶ __end__
  */
 
-const ultimoValor = <T>(porDefecto: () => T) => Annotation<T>({ reducer: (_previo, nuevo) => nuevo, default: porDefecto });
-
 interface DecisionStudio {
   mensaje_id: string;
   resuelto: boolean;
   resumen: string;
 }
 
-export const EstadoMotor = Annotation.Root({
-  /** Entrada: fecha de referencia de las alertas (YYYY-MM-DD). */
-  hoy: Annotation<string>,
-  /** Entrada opcional: solo estos mensajes; sin lista, todo lo pendiente. */
-  mensaje_ids: ultimoValor<string[] | null>(() => null),
-  cola: ultimoValor<string[]>(() => []),
-  /** Mensaje que está recorriendo el grafo y el nodo al que va. */
-  actual: ultimoValor<EstadoMensaje | null>(() => null),
-  siguiente: ultimoValor<NodoMensaje | null>(() => null),
-  mensajes: ultimoValor<ResultadoMensaje[]>(() => []),
-  omitidos: ultimoValor<Omitido[]>(() => []),
-  en_revision: ultimoValor<string[]>(() => []),
-  decisiones: ultimoValor<DecisionStudio[]>(() => []),
-  /** Último reporte de alertas (`out/alertas.md`); se llama así porque `alertas` es el nombre del nodo. */
-  reporte: ultimoValor<Alertas | { error: string } | null>(() => null),
-  error: ultimoValor<string | null>(() => null),
+/** Canal de último valor con su valor inicial: lo que antes era `Annotation<T>({ reducer: (_, nuevo) => nuevo, default })`. */
+const ultimoValor = <T extends z3.ZodTypeAny>(esquema: T, porDefecto: () => z3.infer<T>) =>
+  withLangGraph(esquema, { default: porDefecto, reducer: { fn: (_previo: z3.infer<T>, nuevo: z3.infer<T>) => nuevo } });
+
+/**
+ * Estado en zod (v3, el que publica LangGraph) y no con `Annotation`: así el servidor saca los esquemas en tiempo de
+ * ejecución. Con `Annotation` los infiere compilando el proyecto con TypeScript, una vez por petición de Studio, y
+ * eso no cabe en un contenedor de 512 MB.
+ */
+const DESCRIPCION_HOY = "Fecha de referencia de las alertas (YYYY-MM-DD)";
+const DESCRIPCION_IDS = "Solo estos mensajes; sin lista, todo lo pendiente";
+
+export const EstadoMotor = z3.object({
+  hoy: z3.string().describe(DESCRIPCION_HOY),
+  mensaje_ids: ultimoValor(z3.array(z3.string()).nullable().describe(DESCRIPCION_IDS), () => null),
+  cola: ultimoValor(z3.array(z3.string()), () => []),
+  actual: ultimoValor(z3.custom<EstadoMensaje>().nullable().describe("Mensaje que está recorriendo el grafo, con su recorrido"), () => null),
+  siguiente: ultimoValor(z3.custom<NodoMensaje>().nullable().describe("Nodo al que va el mensaje en curso"), () => null),
+  mensajes: ultimoValor(z3.array(z3.custom<ResultadoMensaje>()), () => []),
+  omitidos: ultimoValor(z3.array(z3.custom<Omitido>()), () => []),
+  en_revision: ultimoValor(z3.array(z3.string()), () => []),
+  decisiones: ultimoValor(z3.array(z3.custom<DecisionStudio>()), () => []),
+  reporte: ultimoValor(
+    z3.custom<Alertas | { error: string }>().nullable().describe("Último reporte de alertas (out/alertas.md); se llama así porque `alertas` es el nombre del nodo"),
+    () => null,
+  ),
+  error: ultimoValor(z3.string().nullable(), () => null),
 });
 
-type Estado = typeof EstadoMotor.State;
-type Actualizacion = typeof EstadoMotor.Update;
+export const EntradaMotor = z3.object({
+  hoy: z3.string().describe(DESCRIPCION_HOY),
+  mensaje_ids: z3.array(z3.string()).nullable().optional().describe(DESCRIPCION_IDS),
+});
+
+type Estado = z3.infer<typeof EstadoMotor>;
+type Actualizacion = Partial<Estado>;
 
 /** Lo que la persona escribe en Studio para reanudar la pausa. */
 const RespuestaRevisionSchema = z.discriminatedUnion("decision", [
@@ -110,7 +126,7 @@ function crearPasada(ctx: ContextoHerramienta) {
     return { reporte: alertas.ok ? alertas.data : { error: alertas.error } };
   }
 
-  const grafo = new StateGraph(EstadoMotor)
+  const grafo = new StateGraph({ state: EstadoMotor, input: EntradaMotor })
     .addNode("ingestar", nodoIngestar)
     .addNode("siguiente_mensaje", siguienteMensaje)
     .addNode("extraer", nodoDeMensaje("extraer"))

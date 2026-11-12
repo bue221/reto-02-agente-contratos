@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { AIMessage, HumanMessage, isToolMessage } from "@langchain/core/messages";
 import { Command, MemorySaver } from "@langchain/langgraph";
+import { getRuntimeGraphSchema } from "@langchain/langgraph-api/schema";
 import { ARISTAS, type NodoMensaje } from "../../api/src/application/workflows/contract-graph.ts";
 import type { ClasificadorDeAlcance } from "../../api/src/agent/guardrails/input-guard.ts";
 import type { LimitesCiclo } from "../../api/src/agent/turn.ts";
 import type { MensajeLlm, ProveedorLlm } from "../../api/src/llm/adapter.ts";
 import { ProveedorOffline } from "../../api/src/llm/offline.ts";
-import { HOY, crearProyecto, leerSalida, lineasJson } from "../../api/tests/helpers.ts";
+import { HOY, RAIZ, crearProyecto, leerSalida, lineasJson } from "../../api/tests/helpers.ts";
 import { compilarMotor } from "../src/engine-graph.ts";
 import { compilarRecepcion } from "../src/receptionist-graph.ts";
 import { crearGrafoReinicio } from "../src/reset-graph.ts";
@@ -48,6 +49,36 @@ describe("grafo del motor en LangGraph", () => {
     const tras = await grafo.invoke(new Command({ resume: { decision: "rechazar" } }), hilo("m2"));
     expect(tras.decisiones[0]).toMatchObject({ mensaje_id: "msg-006", resuelto: false });
     expect((await grafo.getState(hilo("m2"))).next).toEqual(["revision_humana"]);
+  });
+});
+
+describe("esquemas para Studio", () => {
+  test("todos los grafos y subgrafos publican su esquema en tiempo de ejecución, sin el compilador de TypeScript", async () => {
+    const deps = { directorio: RAIZ, proveedor: new ProveedorOffline(), limites: LIMITES };
+    const grafos = { motor: compilarMotor(deps), reiniciar_demo: crearGrafoReinicio(deps).compile(), recepcionista: compilarRecepcion(deps) };
+    for (const [nombre, grafo] of Object.entries(grafos)) {
+      expect({ nombre, esquema: await getRuntimeGraphSchema(grafo) }).toMatchObject({ nombre, esquema: { input: expect.any(Object) } });
+      for await (const [espacio, subgrafo] of grafo.getSubgraphsAsync(undefined, true)) {
+        expect({ espacio, esquema: await getRuntimeGraphSchema(subgrafo) }).toMatchObject({ espacio, esquema: { input: expect.any(Object) } });
+      }
+    }
+    const entradaMotor = (await getRuntimeGraphSchema(grafos.motor))?.input as { properties?: Record<string, unknown> } | undefined;
+    expect(Object.keys(entradaMotor?.properties ?? {})).toEqual(["hoy", "mensaje_ids"]);
+  });
+});
+
+describe("esquemas para Studio", () => {
+  test("todos los grafos y subgrafos publican su esquema en tiempo de ejecución, sin el compilador de TypeScript", async () => {
+    const deps = { directorio: RAIZ, proveedor: new ProveedorOffline(), limites: LIMITES };
+    const grafos = { motor: compilarMotor(deps), reiniciar_demo: crearGrafoReinicio(deps).compile(), recepcionista: compilarRecepcion(deps) };
+    for (const [nombre, grafo] of Object.entries(grafos)) {
+      expect({ nombre, esquema: await getRuntimeGraphSchema(grafo) }).toMatchObject({ nombre, esquema: { input: expect.any(Object) } });
+      for await (const [espacio, subgrafo] of grafo.getSubgraphsAsync(undefined, true)) {
+        expect({ espacio, esquema: await getRuntimeGraphSchema(subgrafo) }).toMatchObject({ espacio, esquema: { input: expect.any(Object) } });
+      }
+    }
+    const entradaMotor = (await getRuntimeGraphSchema(grafos.motor))?.input as { properties?: Record<string, unknown> } | undefined;
+    expect(Object.keys(entradaMotor?.properties ?? {})).toEqual(["hoy", "mensaje_ids"]);
   });
 });
 
