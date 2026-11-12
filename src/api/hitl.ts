@@ -22,7 +22,7 @@ export interface DependenciasHitl {
   hoy?: string;
 }
 
-const AprobadorSchema = z.string().trim().min(1, "indica quién decide").max(80, "máx. 80 caracteres");
+const AprobadorSchema = z.string({ error: "indica quién decide" }).trim().min(1, "indica quién decide").max(80, "máx. 80 caracteres");
 
 const PeticionAprobarSchema = z.object({
   aprobador: AprobadorSchema,
@@ -31,7 +31,7 @@ const PeticionAprobarSchema = z.object({
 
 const PeticionRechazarSchema = z.object({
   aprobador: AprobadorSchema,
-  motivo: z.string().trim().min(1, "el rechazo necesita un motivo").max(500, "máx. 500 caracteres"),
+  motivo: z.string({ error: "el rechazo necesita un motivo" }).trim().min(1, "el rechazo necesita un motivo").max(500, "máx. 500 caracteres"),
 }) satisfies z.ZodType<PeticionRechazar>;
 
 const SESION_BANDEJA = "bandeja";

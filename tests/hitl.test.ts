@@ -175,8 +175,8 @@ describe("bandeja de aprobación (HITL)", () => {
     expect(aprobar.json.error.mensaje).toContain("aprobador");
     expect(aprobar.json.error.mensaje).toContain("correcciones.valor");
     expect(aprobar.json.error.mensaje).toContain("inventado");
-    const rechazar = await post<ErrorApi>(app, "/api/bandeja/msg-006/rechazar", { aprobador: "Ana" });
-    expect(rechazar.json.error.mensaje).toContain("motivo");
+    const rechazar = await post<ErrorApi>(app, "/api/bandeja/msg-006/rechazar", {});
+    expect(rechazar.json.error.mensaje).toBe("aprobador: indica quién decide; motivo: el rechazo necesita un motivo");
     const roto = await app.request("/api/bandeja/msg-006/aprobar", { method: "POST", body: "{no es json" });
     expect(roto.status).toBe(400);
     expect((await pedir<RespuestaBandeja>(app, "/api/bandeja")).json.pendientes).toHaveLength(1);
