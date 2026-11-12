@@ -1,15 +1,24 @@
 {
   "name": "reto-02-agente-contratos",
-  "version": "1.0.0",
-  "description": "Agente conversacional en TypeScript: clasifica correos, extrae contratos con confianza, actualiza un maestro simulado de SharePoint y genera alertas de vencimiento.",
-  "type": "module",
+  "version": "2.0.0",
   "private": true,
-  "engines": { "node": ">=22.18" },
+  "type": "module",
+  "description": "Agente conversacional de registro de contratos vigentes: buzón único, extracción con confianza, maestro CSV, archivo tipo SharePoint y alertas.",
+  "workspaces": ["web"],
   "scripts": {
-    "start": "node src/cli.ts",
-    "process": "node src/cli.ts --process-all",
-    "report": "node src/cli.ts --report",
-    "reset": "node src/cli.ts --reset",
-    "test": "node --test tests/*.test.ts"
+    "dev": "bun run scripts/dev.ts",
+    "start": "bun run src/server.ts",
+    "build": "bun run --cwd web build",
+    "demo": "bun run demo.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p web"
+  },
+  "dependencies": {
+    "hono": "^4.7.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.9.0"
   }
 }
