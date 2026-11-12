@@ -25,3 +25,16 @@ export async function agregarLineaJson(ruta: string, registro: object): Promise<
   await mkdir(dirname(ruta), { recursive: true });
   await appendFile(ruta, `${JSON.stringify(registro)}\n`, "utf8");
 }
+
+/** Lee un `.jsonl` propio; una línea corrupta (p. ej. escritura cortada) se descarta sin perder las demás. */
+export async function leerLineasJson(ruta: string): Promise<unknown[]> {
+  const texto = (await leerTextoOpcional(ruta)) ?? "";
+  return texto.split("\n").flatMap((linea): unknown[] => {
+    if (!linea.trim()) return [];
+    try {
+      return [JSON.parse(linea)];
+    } catch {
+      return [];
+    }
+  });
+}

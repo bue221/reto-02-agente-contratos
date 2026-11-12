@@ -38,10 +38,13 @@ export async function asegurarMaestro(rutas: Rutas): Promise<void> {
   await copyFile(rutas.maestroFixture, rutas.maestro);
 }
 
-export async function leerMaestro(rutas: Rutas): Promise<FilaMaestro[]> {
+/** El CSV tal cual está en `out/sharepoint/` (para descargarlo). */
+export async function leerMaestroCsv(rutas: Rutas): Promise<string> {
   await asegurarMaestro(rutas);
-  return parsearMaestro((await leerTextoOpcional(rutas.maestro)) ?? "");
+  return (await leerTextoOpcional(rutas.maestro)) ?? "";
 }
+
+export const leerMaestro = async (rutas: Rutas): Promise<FilaMaestro[]> => parsearMaestro(await leerMaestroCsv(rutas));
 
 /** Inserta o reemplaza por `id_contrato`, conservando el orden de las filas existentes. */
 export async function guardarFila(rutas: Rutas, fila: FilaMaestro, idAnterior: string | null): Promise<void> {

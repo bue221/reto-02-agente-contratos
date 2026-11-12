@@ -1,8 +1,9 @@
 import type { LlamadaVisible } from "../api/tipos.ts";
 import { registrarLog } from "../almacen/bitacoras.ts";
+import { registrarDecision } from "../almacen/decisiones.ts";
 import { rutasDelProyecto } from "../almacen/rutas.ts";
-import { PREFIJO_REQUIERE_REVISION } from "../casos/registrar.ts";
-import type { ValidacionReportada } from "../casos/validar.ts";
+import { PREFIJO_REQUIERE_REVISION, type Registro } from "../casos/registrar.ts";
+import { type ValidacionReportada, requiereConfirmacion } from "../casos/validar.ts";
 import { type Resultado, fallo, mensajeDeError } from "../dominio/resultado.ts";
 import type { LlamadaHerramienta } from "../llm/adapter.ts";
 import { ejecutarHerramienta, resumirEjecucion } from "../tools/contratos.ts";
@@ -37,14 +38,23 @@ async function confirmacionNoAutorizada(llamada: LlamadaHerramienta, ctx: Contex
   return JSON.stringify(fallo(error));
 }
 
-const CLASIFICACIONES_REGISTRABLES: ReadonlySet<string> = new Set(["nuevo", "actualizacion"]);
-
 /** `validar` con campos en revisión cuenta como pendiente aunque el modelo no llegue a intentar `registrar`. */
 function validacionPendiente(nombre: string, resultado: Resultado<unknown>): boolean {
   if (!esValidar(nombre) || !resultado.ok) return false;
   // Forma de `ValidacionReportada`, devuelta por `contratos_validar`.
-  const { clasificacion, requiere_revision } = resultado.data as Pick<ValidacionReportada, "clasificacion" | "requiere_revision">;
-  return CLASIFICACIONES_REGISTRABLES.has(clasificacion) && requiere_revision.length > 0;
+  return requiereConfirmacion(resultado.data as Pick<ValidacionReportada, "clasificacion" | "requiere_revision">);
+}
+
+/** Una confirmación aceptada en el chat es una decisión humana más: la bandeja la lista junto a las suyas. */
+async function anotarConfirmacionDelChat(llamada: LlamadaHerramienta, ctx: ContextoHerramienta, resultado: Resultado<unknown>): Promise<void> {
+  const mensajeId = mensajeIdDe(llamada.args);
+  if (!esRegistrar(llamada.nombre) || llamada.args.confirmado !== true || !resultado.ok || !mensajeId) return;
+  // Forma de `Registro`, devuelta por `contratos_registrar`.
+  const registro = resultado.data as Registro;
+  const decision = { mensaje_id: mensajeId, decision: "aprobado", via: "chat", aprobador: `chat ${ctx.sessionId}`, correcciones: {}, motivo: null } as const;
+  await registrarDecision(rutasDelProyecto(ctx.directory), { ...decision, id_contrato: registro.id_contrato, accion: registro.accion, cambios: registro.cambios }).catch(
+    (falla: unknown) => console.error(`[decisiones] no se pudo anotar la confirmación de ${mensajeId}: ${mensajeDeError(falla)}`),
+  );
 }
 
 function revisionDe(llamada: LlamadaHerramienta, resultado: Resultado<unknown>): LlamadaEjecutada["revision"] {
@@ -60,6 +70,7 @@ export async function ejecutarLlamada(llamada: LlamadaHerramienta, ctx: Contexto
   const json = (await confirmacionNoAutorizada(llamada, ctx, pendientes)) ?? (await ejecutarHerramienta(llamada.nombre, llamada.args, ctx));
   // Todas las herramientas (y la guarda) devuelven `Resultado` serializado.
   const resultado = JSON.parse(json) as Resultado<unknown>;
+  await anotarConfirmacionDelChat(llamada, ctx, resultado);
   const resumen = resultado.ok ? resumirEjecucion(llamada.nombre, json) : resultado.error;
   return {
     json,

@@ -1,3 +1,5 @@
+import { leerProcesados } from "../almacen/bitacoras.ts";
+import { rutasDelProyecto } from "../almacen/rutas.ts";
 import type { LlamadaVisible, RespuestaChat } from "../api/tipos.ts";
 import { mensajeDeError } from "../dominio/resultado.ts";
 import { type DefinicionHerramienta, type MensajeLlm, type ProveedorLlm, type RespuestaLlm, totalTokens } from "../llm/adapter.ts";
@@ -63,6 +65,7 @@ export class AgenteContratos {
 
   async #turno(sessionId: string, mensaje: string): Promise<RespuestaChat> {
     const sesion = (await this.#deps.sesiones.obtener(sessionId)) ?? nuevaSesion(sessionId);
+    sesion.pendientesConfirmacion = await this.#pendientesVigentes(sesion.pendientesConfirmacion);
     const turno = this.#iniciarTurno(sesion, mensaje);
     const texto = await this.#resolver(turno).catch((error: unknown) => `Ocurrió un error interno: ${mensajeDeError(error)}. Puedes volver a intentarlo.`);
     const respuesta = this.#cerrarTurno(turno, texto);
@@ -71,6 +74,18 @@ export class AgenteContratos {
     await this.#deps.sesiones.guardar(sesion);
     console.info(`[agente] sesión ${sessionId}: ${respuesta.toolCalls.length} llamadas, confirmación=${respuesta.needsConfirmation}, tokens=${totalTokens(sesion.tokens)}`);
     return respuesta;
+  }
+
+  /** Un mensaje resuelto en otro canal (bandeja u otra sesión) deja de esperar confirmación aquí. */
+  async #pendientesVigentes(pendientes: readonly string[]): Promise<string[]> {
+    if (pendientes.length === 0) return [];
+    try {
+      const procesados = await leerProcesados(rutasDelProyecto(this.#deps.directorio));
+      return pendientes.filter((id) => !(id in procesados));
+    } catch (error) {
+      console.error(`[agente] no se pudo leer procesados.json: ${mensajeDeError(error)}`);
+      return [...pendientes];
+    }
   }
 
   #iniciarTurno(sesion: Sesion, mensaje: string): Turno {

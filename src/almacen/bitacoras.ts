@@ -2,14 +2,15 @@ import { copyFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import type { Cambios } from "../reglas/fila.ts";
-import { agregarLineaJson, escribirTexto, leerTextoOpcional } from "./archivos.ts";
+import { agregarLineaJson, escribirTexto, leerLineasJson, leerTextoOpcional } from "./archivos.ts";
 import type { Rutas } from "./rutas.ts";
 
-export type EstadoProcesado = "registrado" | "actualizado" | "duplicado" | "rechazado";
+const ESTADOS_PROCESADO = ["registrado", "actualizado", "duplicado", "rechazado"] as const;
+export type EstadoProcesado = (typeof ESTADOS_PROCESADO)[number];
 
 const ProcesadosSchema = z.record(
   z.string(),
-  z.object({ estado: z.string(), id_contrato: z.string().nullable(), ts: z.string() }),
+  z.object({ estado: z.enum(ESTADOS_PROCESADO), id_contrato: z.string().nullable(), ts: z.string() }),
 );
 export type Procesados = z.infer<typeof ProcesadosSchema>;
 
@@ -44,6 +45,14 @@ export interface EntradaLog {
 
 export const registrarLog = (rutas: Rutas, entrada: EntradaLog): Promise<void> =>
   agregarLineaJson(rutas.log, { ts: new Date().toISOString(), ...entrada });
+
+type ConFecha<T> = T & { ts: string };
+
+// Ambos archivos los escribe solo este módulo con las formas de arriba.
+export const leerHistorial = async (rutas: Rutas): Promise<ConFecha<EntradaHistorial>[]> =>
+  (await leerLineasJson(rutas.historial)) as ConFecha<EntradaHistorial>[];
+
+export const leerLog = async (rutas: Rutas): Promise<ConFecha<EntradaLog>[]> => (await leerLineasJson(rutas.log)) as ConFecha<EntradaLog>[];
 
 /** Copia el documento a `out/sharepoint/<rutaRelativa>`. */
 export async function archivarDocumento(rutas: Rutas, origen: string, rutaRelativa: string): Promise<void> {

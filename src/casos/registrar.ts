@@ -8,7 +8,7 @@ import type { Contrato } from "../dominio/contrato.ts";
 import { type Resultado, exito, fallo } from "../dominio/resultado.ts";
 import type { Revision } from "../reglas/clasificar.ts";
 import { type Cambios, type FilaConstruida, cambiosEntre, construirFila } from "../reglas/fila.ts";
-import { type MensajeEvaluado, evaluarMensaje, marcarSiEsTerminal } from "./validar.ts";
+import { type MensajeEvaluado, anotarEvaluacion, evaluarMensaje } from "./validar.ts";
 
 export interface SolicitudRegistro {
   mensajeId: string;
@@ -56,7 +56,7 @@ export async function registrarMensaje(rutas: Rutas, solicitud: SolicitudRegistr
   const evaluado = await evaluarMensaje(rutas, mensajeId, solicitud.contrato);
   if (!evaluado.ok) return evaluado;
   const { validacion, campos, existente } = evaluado.data.evaluacion;
-  await marcarSiEsTerminal(rutas, mensajeId, validacion);
+  await anotarEvaluacion(rutas, mensajeId, validacion, solicitud.confirmado);
   if (validacion.clasificacion === "rechazado") return fallo(`rechazado: ${validacion.motivo ?? "sin motivo"}`);
   if (validacion.clasificacion === "duplicado" || !campos) {
     return exito({ id_contrato: validacion.id_contrato_existente, accion: "duplicado", ruta_archivo: null, cambios: {}, avisos: validacion.avisos });

@@ -21,30 +21,47 @@ const campoSchema = <T extends z.ZodType>(valor: T, descripcion: string) =>
 
 export const TIPOS_DOCUMENTO = ["contrato", "otrosi", "otro"] as const;
 
+/** Valor válido de cada campo: lo comparten la extracción y las correcciones humanas. */
+const VALORES = {
+  id_contrato: z.string().min(1),
+  cliente: z.string().min(1),
+  nit_cliente: z.string().regex(/^\d+$/, "identificador tributario sin puntos ni dígito de verificación"),
+  pais: PaisSchema,
+  objeto: z.string().min(1).max(MAX_LONGITUD_OBJETO),
+  valor: z.number().nonnegative(),
+  moneda: MonedaSchema,
+  fecha_inicio: FechaIsoSchema,
+  fecha_fin: FechaIsoSchema,
+  requiere_poliza: z.boolean(),
+  tipo_poliza: z.string(),
+};
+
 /** Esquema de extracción (PRD 7.2 + HU-2): cada campo del maestro con su confianza. */
 export const ContratoSchema = z.object({
   tipo_documento: z.enum(TIPOS_DOCUMENTO).describe("contrato, otrosi (modifica uno existente) u otro (no es contrato)"),
   numero_otrosi: z.number().int().positive().nullable().default(null).describe("Número del otrosí, null si no es otrosí"),
   campos_modificados: z.array(z.string()).default([]).describe("Campos que el otrosí modifica; vacío si no es otrosí"),
   valor_indeterminado: z.boolean().describe("true si el contrato es por demanda y no tiene valor total"),
-  id_contrato: campoSchema(z.string().min(1), "Número del contrato tal como aparece en el documento"),
-  cliente: campoSchema(z.string().min(1), "Razón social del CONTRATANTE (nunca Periferia)"),
-  nit_cliente: campoSchema(
-    z.string().regex(/^\d+$/, "identificador tributario sin puntos ni dígito de verificación"),
-    "NIT/RUC/RTN del cliente sin puntos ni dígito de verificación",
-  ),
-  pais: campoSchema(PaisSchema, "País del cliente"),
-  objeto: campoSchema(z.string().min(1).max(MAX_LONGITUD_OBJETO), "Objeto del contrato, máx. 200 caracteres"),
-  valor: campoSchema(z.number().nonnegative(), "Valor total sin separadores; 0 si es por demanda"),
-  moneda: campoSchema(MonedaSchema, "Moneda del valor"),
-  fecha_inicio: campoSchema(FechaIsoSchema, "Fecha de inicio YYYY-MM-DD"),
-  fecha_fin: campoSchema(FechaIsoSchema, "Fecha de fin YYYY-MM-DD"),
-  requiere_poliza: campoSchema(z.boolean(), "Si el contrato exige constituir póliza"),
-  tipo_poliza: campoSchema(z.string(), "Tipos de póliza separados por ';', vacío si no requiere"),
+  id_contrato: campoSchema(VALORES.id_contrato, "Número del contrato tal como aparece en el documento"),
+  cliente: campoSchema(VALORES.cliente, "Razón social del CONTRATANTE (nunca Periferia)"),
+  nit_cliente: campoSchema(VALORES.nit_cliente, "NIT/RUC/RTN del cliente sin puntos ni dígito de verificación"),
+  pais: campoSchema(VALORES.pais, "País del cliente"),
+  objeto: campoSchema(VALORES.objeto, "Objeto del contrato, máx. 200 caracteres"),
+  valor: campoSchema(VALORES.valor, "Valor total sin separadores; 0 si es por demanda"),
+  moneda: campoSchema(VALORES.moneda, "Moneda del valor"),
+  fecha_inicio: campoSchema(VALORES.fecha_inicio, "Fecha de inicio YYYY-MM-DD"),
+  fecha_fin: campoSchema(VALORES.fecha_fin, "Fecha de fin YYYY-MM-DD"),
+  requiere_poliza: campoSchema(VALORES.requiere_poliza, "Si el contrato exige constituir póliza"),
+  tipo_poliza: campoSchema(VALORES.tipo_poliza, "Tipos de póliza separados por ';', vacío si no requiere"),
   notas: z.array(z.string()).default([]).describe("Heurísticas y supuestos aplicados en la extracción"),
 });
 
 export type Contrato = z.infer<typeof ContratoSchema>;
+
+/** Valores que una persona fija al aprobar desde la bandeja; sin null: corregir nunca borra un campo. */
+export const CorreccionesSchema = z.object(VALORES).partial().strict();
+
+export type Correcciones = z.infer<typeof CorreccionesSchema>;
 
 export const CAMPOS_CONTRATO = [
   "id_contrato",

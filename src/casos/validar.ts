@@ -1,3 +1,4 @@
+import { guardarAnalisis } from "../almacen/analisis.ts";
 import { marcarProcesado } from "../almacen/bitacoras.ts";
 import { type Remitente, avisoDeRemitente, resolverRemitente } from "../almacen/comerciales.ts";
 import { leerMaestro } from "../almacen/maestro.ts";
@@ -5,7 +6,7 @@ import type { Rutas } from "../almacen/rutas.ts";
 import type { Contrato } from "../dominio/contrato.ts";
 import type { FilaMaestro } from "../dominio/maestro.ts";
 import { type Resultado, exito } from "../dominio/resultado.ts";
-import { type Evaluacion, type Validacion, clasificar } from "../reglas/clasificar.ts";
+import { type Clasificacion, type Evaluacion, type Validacion, clasificar } from "../reglas/clasificar.ts";
 import { type MensajeCargado, cargarMensaje, extraerDeMensaje } from "./mensaje.ts";
 
 export interface MensajeEvaluado {
@@ -38,18 +39,33 @@ export async function evaluarMensaje(rutas: Rutas, mensajeId: string, propuesto:
 
 export type ValidacionReportada = Validacion & { comercial: string | null; procesado: boolean };
 
+const CLASIFICACIONES_REGISTRABLES: ReadonlySet<Clasificacion> = new Set(["nuevo", "actualizacion"]);
+
+/** RN5 / CA3: el mensaje solo se registra con una confirmación humana explícita. */
+export const requiereConfirmacion = (validacion: Pick<Validacion, "clasificacion" | "requiere_revision">): boolean =>
+  CLASIFICACIONES_REGISTRABLES.has(validacion.clasificacion) && validacion.requiere_revision.length > 0;
+
 /** Rechazado y duplicado son estados terminales: no hay nada que registrar, el mensaje sale del buzón. */
-export async function marcarSiEsTerminal(rutas: Rutas, mensajeId: string, validacion: Validacion): Promise<boolean> {
+async function marcarSiEsTerminal(rutas: Rutas, mensajeId: string, validacion: Validacion): Promise<boolean> {
   const { clasificacion, id_contrato_existente } = validacion;
   if (clasificacion !== "rechazado" && clasificacion !== "duplicado") return false;
   await marcarProcesado(rutas, mensajeId, clasificacion, id_contrato_existente);
   return true;
 }
 
+/**
+ * Deja constancia de la evaluación: el último análisis sin confirmación humana es la fuente única
+ * de "espera confirmación" para el chat y la bandeja. Devuelve si el mensaje quedó cerrado.
+ */
+export async function anotarEvaluacion(rutas: Rutas, mensajeId: string, validacion: Validacion, confirmado: boolean): Promise<boolean> {
+  if (!confirmado) await guardarAnalisis(rutas, mensajeId, validacion);
+  return marcarSiEsTerminal(rutas, mensajeId, validacion);
+}
+
 export async function validarMensaje(rutas: Rutas, mensajeId: string, propuesto: Contrato): Promise<Resultado<ValidacionReportada>> {
   const evaluado = await evaluarMensaje(rutas, mensajeId, propuesto);
   if (!evaluado.ok) return evaluado;
   const { validacion } = evaluado.data.evaluacion;
-  const procesado = await marcarSiEsTerminal(rutas, mensajeId, validacion);
+  const procesado = await anotarEvaluacion(rutas, mensajeId, validacion, false);
   return exito({ ...validacion, comercial: evaluado.data.remitente.comercial?.nombre ?? null, procesado });
 }

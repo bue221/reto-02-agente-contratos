@@ -13,6 +13,10 @@ export interface Rutas {
   log: string;
   procesados: string;
   alertas: string;
+  /** Último análisis de cada mensaje: alimenta la bandeja de aprobación y el detalle del buzón. */
+  analisis: string;
+  /** Decisiones humanas (bandeja y confirmaciones del chat). */
+  decisiones: string;
 }
 
 export function rutasDelProyecto(directorio: string): Rutas {
@@ -31,6 +35,8 @@ export function rutasDelProyecto(directorio: string): Rutas {
     log: join(out, "log.jsonl"),
     procesados: join(out, "procesados.json"),
     alertas: join(out, "alertas.md"),
+    analisis: join(out, "analisis.json"),
+    decisiones: join(out, "decisiones.jsonl"),
   };
 }
 

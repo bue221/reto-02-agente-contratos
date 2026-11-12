@@ -9,11 +9,11 @@ import { type AlmacenSesiones, ID_SESION, type Sesion } from "../agente/sesiones
 import { leerMaestro } from "../almacen/maestro.ts";
 import { rutasDelProyecto } from "../almacen/rutas.ts";
 import { mensajeDeError } from "../dominio/resultado.ts";
-import type { FilaMaestro } from "../dominio/maestro.ts";
-import { describirErroresZod } from "../tools/herramienta.ts";
-import type { ErrorApi, PeticionChat, RespuestaChat, Salud } from "./tipos.ts";
+import { type DependenciasHitl, rutasHitl } from "./hitl.ts";
+import { errorApi, leerCuerpo } from "./http.ts";
+import type { PeticionChat, RespuestaChat, RespuestaMaestro, Salud } from "./tipos.ts";
 
-/** API HTTP del chat (PRD 6.4). Sin estado propio: delega en el agente y el almacén de sesiones. */
+/** API HTTP (PRD 6.4): chat, buzón y bandeja. Sin estado propio: delega en el agente, los casos de uso y el almacén. */
 
 export interface DependenciasApi {
   agente: Pick<AgenteContratos, "conversar" | "proveedor">;
@@ -22,6 +22,8 @@ export interface DependenciasApi {
   /** Carpeta del front compilado; si no existe, solo se expone la API. */
   webDist?: string;
   origenesCors?: string[];
+  /** Fecha de registro fija para tests deterministas. */
+  hoy?: string;
 }
 
 const MAX_LONGITUD_MENSAJE = 4000;
@@ -31,16 +33,14 @@ const PeticionChatSchema = z.object({
   message: z.string().trim().min(1, "el mensaje no puede estar vacío").max(MAX_LONGITUD_MENSAJE, `máx. ${MAX_LONGITUD_MENSAJE} caracteres`),
 }) satisfies z.ZodType<PeticionChat>;
 
-const errorApi = (codigo: string, mensaje: string): ErrorApi => ({ ok: false, error: { codigo, mensaje } });
-
-function rutasDeApi(app: Hono, deps: DependenciasApi): void {
+function rutasDelChat(app: Hono, deps: DependenciasApi): void {
   app.get("/api/health", (c) => c.json<Salud>({ ok: true, provider: deps.agente.proveedor.nombre, model: deps.agente.proveedor.modelo }));
 
   app.post("/api/chat", async (c) => {
-    const cuerpo: unknown = await c.req.json().catch(() => null);
-    const peticion = PeticionChatSchema.safeParse(cuerpo);
-    if (!peticion.success) return c.json(errorApi("peticion_invalida", describirErroresZod(peticion.error)), 400);
-    return c.json<RespuestaChat>(await deps.agente.conversar(peticion.data.sessionId, peticion.data.message));
+    const peticion = await leerCuerpo(c, PeticionChatSchema);
+    if (!peticion.ok) return peticion.respuesta;
+    const { sessionId, message } = peticion.data;
+    return c.json<RespuestaChat>(await deps.agente.conversar(sessionId, message));
   });
 
   app.get("/api/sessions/:id", async (c) => {
@@ -48,9 +48,7 @@ function rutasDeApi(app: Hono, deps: DependenciasApi): void {
     return sesion ? c.json<Sesion>(sesion) : c.json(errorApi("sesion_no_encontrada", `no existe la sesión ${c.req.param("id")}`), 404);
   });
 
-  app.get("/api/maestro", async (c) => c.json<{ filas: FilaMaestro[] }>({ filas: await leerMaestro(rutasDelProyecto(deps.directorio)) }));
-
-  app.all("/api/*", (c) => c.json(errorApi("ruta_no_encontrada", `${c.req.method} ${c.req.path} no existe`), 404));
+  app.get("/api/maestro", async (c) => c.json<RespuestaMaestro>({ filas: await leerMaestro(rutasDelProyecto(deps.directorio)) }));
 }
 
 /** En producción el mismo proceso sirve el front compilado (un solo despliegue); rutas desconocidas → SPA. */
@@ -68,7 +66,10 @@ export function crearApp(deps: DependenciasApi): Hono {
     return c.json(errorApi("error_interno", "Error interno del servidor. Revisa los logs del backend."), 500);
   });
   if (deps.origenesCors?.length) app.use("/api/*", cors({ origin: deps.origenesCors }));
-  rutasDeApi(app, deps);
+  rutasDelChat(app, deps);
+  const hitl: DependenciasHitl = { directorio: deps.directorio, ...(deps.hoy ? { hoy: deps.hoy } : {}) };
+  rutasHitl(app, hitl);
+  app.all("/api/*", (c) => c.json(errorApi("ruta_no_encontrada", `${c.req.method} ${c.req.path} no existe`), 404));
   if (deps.webDist) frontEstatico(app, deps.webDist);
   return app;
 }
