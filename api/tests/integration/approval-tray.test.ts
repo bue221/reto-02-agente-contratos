@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { chmod } from "node:fs/promises";
 import type { Hono } from "hono";
 import { AgenteContratos } from "../../src/agent/loop.ts";
 import { SesionesEnArchivo } from "../../src/agent/sessions.ts";
@@ -220,6 +221,20 @@ describe("reinicio de la demo", () => {
     expect((await app.request("/api/sessions/c3")).status).toBe(404);
     const { json: maestro } = await pedir<RespuestaMaestro>(app, "/api/maestro");
     expect(maestro.filas.some((fila) => fila.id_contrato === "CT-2026-015")).toBe(false);
+  });
+
+  test("POST /api/demo/reset funciona cuando el directorio padre de out/ es de solo lectura (como /app en Docker)", async () => {
+    const { app, directorio } = await crearPrueba();
+    await post(app, "/api/buzon/msg-001/procesar");
+    await chmod(directorio, 0o555);
+    try {
+      const { status, json } = await post<RespuestaReinicio>(app, "/api/demo/reset");
+      expect(status).toBe(200);
+      expect(json).toEqual({ ok: true, mensajes: 6 });
+      expect((await pedir<RespuestaBuzon>(app, "/api/buzon")).json.contadores.pendientes).toBe(6);
+    } finally {
+      await chmod(directorio, 0o755);
+    }
   });
 
   test("el reinicio espera a que termine el turno de chat en curso", async () => {
